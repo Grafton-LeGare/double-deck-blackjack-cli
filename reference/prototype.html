@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Double Deck Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&family=Libre+Baskerville:wght@700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --felt:#0A1F1A;
+  --panel:#0F2A23;
+  --panel-2:#123128;
+  --line:#1C3E35;
+  --line-soft:#16342C;
+  --bone:#F4EFE3;
+  --ink:#14201D;
+  --cut:#F2C230;          /* cut card yellow — count data only */
+  --txt:#CFDDD6;
+  --mut:#7E9A90;
+  --ok:#4FB286;
+  --bad:#E2574C;
+  --red:#C0392B;
+  --c-white:#E8E4DA;
+  --c-red:#C4443C;
+  --c-green:#2E8B57;
+  --c-black:#20211F;
+  --c-purple:#7B4B9E;
+  --r:4px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--felt);
+  color:var(--txt);
+  font-family:'Instrument Sans',system-ui,sans-serif;
+  font-size:15px;line-height:1.45;
+  min-height:100dvh;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select{font:inherit;color:inherit}
+.mono{font-family:'DM Mono',ui-monospace,monospace;font-feature-settings:"tnum"}
+
+/* ---------- shell ---------- */
+header{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 14px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--felt);z-index:40;
+}
+.brand{font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);white-space:nowrap}
+.brand b{color:var(--txt);font-weight:500}
+nav{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+nav button{
+  font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+  padding:6px 10px;border:1px solid transparent;border-radius:var(--r);color:var(--mut)
+}
+nav button[aria-selected="true"]{color:var(--felt);background:var(--txt);font-weight:600}
+nav button:hover:not([aria-selected="true"]){border-color:var(--line);color:var(--txt)}
+
+main{max-width:1080px;margin:0 auto;padding:14px}
+.view{display:none}
+.view.on{display:block}
+
+/* ---------- table + rail ---------- */
+.wrap{display:grid;grid-template-columns:1fr 250px;gap:14px;align-items:start}
+@media(max-width:760px){.wrap{grid-template-columns:1fr}}
+
+.felt{
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;
+  padding:16px 14px;min-height:330px;display:flex;flex-direction:column;gap:14px;
+}
+.seat-label{
+  font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mut);margin-bottom:6px;display:flex;gap:8px;align-items:baseline
+}
+.seat-label .tot{color:var(--txt)}
+.hands{display:flex;gap:10px;flex-wrap:wrap}
+.hand{
+  border:1px solid transparent;border-radius:var(--r);padding:6px;
+  transition:border-color .15s, background .15s;
+}
+.hand.active{border-color:var(--cut);background:rgba(242,194,48,.06)}
+.hand.settled-win{border-color:var(--ok)}
+.hand.settled-lose{border-color:var(--line)}
+.hand-meta{
+  font-family:'DM Mono',monospace;font-size:10px;color:var(--mut);
+  margin-top:5px;letter-spacing:.06em;display:flex;gap:8px
+}
+.cards{display:flex;gap:5px}
+
+.card{
+  width:46px;height:66px;border-radius:3px;background:var(--bone);color:var(--ink);
+  display:flex;flex-direction:column;justify-content:space-between;padding:4px 5px;
+  font-family:'Libre Baskerville',Georgia,serif;font-weight:700;
+  box-shadow:0 1px 0 rgba(0,0,0,.5), 0 6px 14px rgba(0,0,0,.35);
+  animation:deal .22s ease-out both;
+}
+@media(max-width:400px){.card{width:40px;height:58px}}
+.card .rk{font-size:15px;line-height:1}
+.card .su{font-size:13px;line-height:1;align-self:flex-end}
+.card.red{color:var(--red)}
+.card.back{
+  background:
+    repeating-linear-gradient(45deg,#123128 0 4px,#1C3E35 4px 8px);
+  border:2px solid var(--bone);
+}
+@keyframes deal{from{opacity:0;transform:translateY(-10px) rotate(-3deg)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.card{animation:none}}
+
+/* ---------- actions ---------- */
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.act{
+  flex:1 1 88px;padding:13px 10px;border:1px solid var(--line);border-radius:var(--r);
+  background:var(--panel-2);font-size:13px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;text-align:center;transition:background .12s,border-color .12s;
+}
+.act:hover:not(:disabled){border-color:var(--txt)}
+.act:disabled{opacity:.28;cursor:default}
+.act .key{display:block;font-family:'DM Mono',monospace;font-size:9px;color:var(--mut);letter-spacing:.1em;margin-top:2px}
+.act.primary{background:var(--txt);color:var(--felt);border-color:var(--txt)}
+.act.primary .key{color:rgba(10,31,26,.55)}
+
+/* ---------- feedback ---------- */
+.fb{
+  border-left:2px solid var(--line);padding:8px 0 8px 11px;min-height:52px;
+  font-size:13.5px;
+}
+.fb .verdict{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;display:block;margin-bottom:3px}
+.fb.good{border-color:var(--ok)} .fb.good .verdict{color:var(--ok)}
+.fb.bad{border-color:var(--bad)} .fb.bad .verdict{color:var(--bad)}
+.fb.dev{border-color:var(--cut)} .fb.dev .verdict{color:var(--cut)}
+.fb .why{color:var(--mut)}
+.fb .why b{color:var(--txt);font-weight:500}
+
+/* ---------- rail ---------- */
+.rail{display:flex;flex-direction:column;gap:10px}
+@media(max-width:760px){.rail{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .rail .tray-box{grid-column:1/-1}}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:11px 12px}
+.box h3{
+  margin:0 0 8px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mut);font-weight:400;
+}
+.readout{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0}
+.readout .k{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-family:'DM Mono',monospace}
+.readout .v{font-family:'DM Mono',monospace;font-size:19px;font-weight:500;color:var(--cut)}
+.readout .v.sm{font-size:14px;color:var(--txt)}
+.masked{filter:blur(7px);opacity:.55;user-select:none}
+.peek{
+  width:100%;margin-top:8px;padding:7px;border:1px dashed var(--line);border-radius:var(--r);
+  font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)
+}
+.peek:hover{border-color:var(--cut);color:var(--cut)}
+
+/* ---------- discard tray (signature) ---------- */
+.tray-box{display:flex;gap:12px;align-items:stretch}
+.tray{
+  position:relative;width:52px;flex:0 0 52px;height:150px;
+  border:1px solid var(--line);border-radius:3px;background:#081915;overflow:hidden;
+}
+.tray-fill{
+  position:absolute;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(to top,var(--bone) 0 2px,rgba(10,31,26,.55) 2px 3.4px);
+  transition:height .35s cubic-bezier(.2,.8,.2,1);
+}
+.tray-cut{
+  position:absolute;left:-3px;right:-3px;height:5px;background:var(--cut);
+  border-radius:1px;box-shadow:0 0 0 1px rgba(10,31,26,.7);
+  transition:bottom .2s;
+}
+.tray-meta{display:flex;flex-direction:column;justify-content:center;gap:9px;flex:1}
+.tray-meta .big{font-family:'DM Mono',monospace;font-size:24px;color:var(--cut);line-height:1}
+.tray-meta .lbl{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+
+/* ---------- chips ---------- */
+.chips{display:flex;gap:7px;flex-wrap:wrap}
+.chip{
+  width:44px;height:44px;border-radius:50%;border:2px dashed rgba(255,255,255,.35);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:#fff;
+  transition:transform .12s, box-shadow .12s;
+}
+.chip:hover{transform:translateY(-3px)}
+.chip.sel{box-shadow:0 0 0 2px var(--felt),0 0 0 4px var(--cut)}
+.chip[data-c="1"]{background:var(--c-white);color:#20211F;border-color:rgba(0,0,0,.3)}
+.chip[data-c="2"]{background:var(--c-red)}
+.chip[data-c="4"]{background:var(--c-green)}
+.chip[data-c="6"]{background:var(--c-black);border-color:rgba(255,255,255,.45)}
+.chip[data-c="8"]{background:var(--c-purple)}
+.chip[data-c="12"]{background:#E08A2E;color:#20211F}
+
+/* ---------- stats strip ---------- */
+.strip{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:14px
+}
+.stat{background:var(--panel);padding:9px 11px}
+.stat .k{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+.stat .v{font-family:'DM Mono',monospace;font-size:17px;margin-top:2px}
+.stat .v.pos{color:var(--ok)} .stat .v.neg{color:var(--bad)}
+
+/* ---------- modal ---------- */
+.scrim{position:fixed;inset:0;background:rgba(5,15,12,.86);display:none;align-items:center;justify-content:center;padding:20px;z-index:100}
+.scrim.on{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px;max-width:400px;width:100%}
+.modal h2{margin:0 0 4px;font-size:19px}
+.modal p{margin:0 0 16px;color:var(--mut);font-size:13.5px}
+.modal input[type=number]{
+  width:100%;padding:14px;background:#081915;border:1px solid var(--line);border-radius:var(--r);
+  font-family:'DM Mono',monospace;font-size:26px;text-align:center;color:var(--cut)
+}
+.modal input:focus{outline:2px solid var(--cut);outline-offset:1px}
+
+/* ---------- tables / settings ---------- */
+table.chart{border-collapse:collapse;font-family:'DM Mono',monospace;font-size:11px;width:100%;margin-bottom:20px}
+table.chart th,table.chart td{border:1px solid var(--line-soft);padding:4px 2px;text-align:center;min-width:22px}
+table.chart th{color:var(--mut);font-weight:400;background:var(--panel)}
+table.chart th.rowh{text-align:left;padding-left:6px;color:var(--txt)}
+td.a-H{background:#1E3A32} td.a-S{background:#3D2B22;color:#F0D5B8}
+td.a-D{background:#2A4A6B;color:#CFE4F5} td.a-P{background:#3A2A55;color:#DCC8F0}
+td.a-R{background:#4A2430;color:#F0C0CC}
+
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.row:last-child{border-bottom:none}
+.row label{font-size:14px}
+.row .hint{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}
+select,input[type=number].mini{background:#081915;border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;font-size:13px}
+input[type=range]{accent-color:var(--cut);width:130px}
+.sw{width:44px;height:24px;border-radius:12px;background:var(--line);position:relative;flex:0 0 44px;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--mut);transition:transform .15s,background .15s}
+.sw[aria-checked="true"]{background:rgba(242,194,48,.3)}
+.sw[aria-checked="true"]::after{transform:translateX(20px);background:var(--cut)}
+
+.log{font-family:'DM Mono',monospace;font-size:11.5px;color:var(--mut);max-height:210px;overflow:auto}
+.log div{padding:5px 0;border-bottom:1px solid var(--line-soft)}
+.log b{color:var(--bad);font-weight:400}
+.empty{color:var(--mut);font-size:13px;font-style:italic}
+
+h2.sec{font-size:13px;font-family:'DM Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--mut);font-weight:400;margin:22px 0 10px}
+p.note{font-size:13px;color:var(--mut);max-width:62ch}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-family:'DM Mono',monospace;font-size:11px;color:var(--mut);margin-bottom:12px}
+.legend span::before{content:"";display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:2px;vertical-align:-1px}
+.lg-H::before{background:#1E3A32}.lg-S::before{background:#3D2B22}.lg-D::before{background:#2A4A6B}
+.lg-P::before{background:#3A2A55}.lg-R::before{background:#4A2430}
+
+.drill-stage{
+  min-height:200px;display:flex;align-items:center;justify-content:center;gap:8px;
+  background:var(--panel);border:1px solid var(--line);border-radius:6px;margin-bottom:12px
+}
+:focus-visible{outline:2px solid var(--cut);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand" id="brand"><b>DOUBLE DECK</b> · TRAINER</div>
+  <nav role="tablist">
+    <button role="tab" data-tab="play" aria-selected="true">Play</button>
+    <button role="tab" data-tab="drill" aria-selected="false">Count drill</button>
+    <button role="tab" data-tab="chart" aria-selected="false">Chart</button>
+    <button role="tab" data-tab="stats" aria-selected="false">Stats</button>
+    <button role="tab" data-tab="rules" aria-selected="false">Game</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ============ PLAY ============ -->
+<section class="view on" id="v-play">
+  <div class="wrap">
+    <div>
+      <div class="felt">
+        <div>
+          <div class="seat-label">Dealer <span class="tot mono" id="d-tot"></span></div>
+          <div class="cards" id="d-cards"></div>
+        </div>
+        <div>
+          <div class="seat-label">You <span class="tot mono" id="p-bank"></span></div>
+          <div class="hands" id="p-hands"></div>
+        </div>
+        <div class="fb" id="fb">
+          <span class="verdict">Ready</span>
+          <span class="why">Set your bet from the count, then deal.</span>
+        </div>
+        <div class="acts" id="acts"></div>
+      </div>
+      <div class="strip" id="strip"></div>
+    </div>
+
+    <aside class="rail">
+      <div class="box">
+        <h3>Count</h3>
+        <div id="count-body">
+          <div class="readout"><span class="k">Running</span><span class="v mono" id="rc">0</span></div>
+          <div class="readout"><span class="k">True</span><span class="v mono" id="tc">0.0</span></div>
+        </div>
+        <button class="peek" id="peek-btn">Peek — costs you</button>
+      </div>
+
+      <div class="box tray-box">
+        <div class="tray">
+          <div class="tray-fill" id="tray-fill" style="height:0%"></div>
+          <div class="tray-cut" id="tray-cut"></div>
+        </div>
+        <div class="tray-meta">
+          <div>
+            <div class="lbl">Decks left</div>
+            <div class="big mono" id="decks-left">2.00</div>
+          </div>
+          <div>
+            <div class="lbl">Discards</div>
+            <div class="mono" style="font-size:14px" id="discards">0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3 id="chip-label">Your bet — units</h3>
+        <div class="chips" id="chips"></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ DRILL ============ -->
+<section class="view" id="v-drill">
+  <div class="drill-stage" id="drill-stage"><span class="empty">Press start. Cards flash one at a time — hold the running count.</span></div>
+  <div class="acts" style="margin-bottom:14px">
+    <button class="act primary" id="drill-start">Start drill</button>
+    <button class="act" id="drill-stop">Stop</button>
+  </div>
+  <div class="box">
+    <div class="row">
+      <label for="drill-speed">Speed <span class="hint">Seconds each card stays up</span></label>
+      <div><input type="range" id="drill-speed" min="0.2" max="2.5" step="0.1" value="1"><span class="mono" id="drill-speed-v" style="margin-left:8px">1.0s</span></div>
+    </div>
+    <div class="row">
+      <label for="drill-count">Cards <span class="hint">104 runs both decks to a closing count of zero</span></label>
+      <input type="number" class="mini" id="drill-count" value="26" min="5" max="104" style="width:80px">
+    </div>
+    <div class="row">
+      <label for="drill-pairs">Deal in pairs <span class="hint">Two cards at a time, like a real pitch game</span></label>
+      <button class="sw" role="switch" aria-checked="false" id="drill-pairs"></button>
+    </div>
+  </div>
+  <h2 class="sec">Hi-Lo tags</h2>
+  <p class="note mono" style="font-size:13px">2 3 4 5 6 → +1&nbsp;&nbsp;·&nbsp;&nbsp;7 8 9 → 0&nbsp;&nbsp;·&nbsp;&nbsp;10 J Q K A → −1</p>
+</section>
+
+<!-- ============ CHART ============ -->
+<section class="view" id="v-chart">
+  <p class="note" id="chart-caption"></p>
+  <div class="legend">
+    <span class="lg-H">H hit</span><span class="lg-S">S stand</span>
+    <span class="lg-D">Dh / Ds double, else hit or stand</span>
+    <span class="lg-P">P split &nbsp; Ph split only with DAS</span>
+    <span class="lg-R">Rh / Rs / Rp surrender if offered</span>
+  </div>
+  <h2 class="sec">Hard totals</h2><div id="chart-hard"></div>
+  <h2 class="sec">Soft totals</h2><div id="chart-soft"></div>
+  <h2 class="sec">Pairs</h2><div id="chart-pair"></div>
+  <h2 class="sec">Deviations — Hi-Lo, double deck</h2>
+  <p class="note">Play the index when the true count reaches the number. Below it, play the other line. Entries that two-deck basic strategy already covers are left out \u2014 nine against a two is a double on this chart, so it carries no index.</p>
+  <div id="chart-dev"></div>
+</section>
+
+<!-- ============ STATS ============ -->
+<section class="view" id="v-stats">
+  <div class="strip" id="strip2"></div>
+  <h2 class="sec">Mistakes</h2>
+  <div class="box"><div class="log" id="mistake-log"><span class="empty">Nothing logged yet.</span></div></div>
+  <div class="acts" style="margin-top:14px">
+    <button class="act" id="reset-stats">Reset session</button>
+  </div>
+</section>
+
+<!-- ============ RULES ============ -->
+<section class="view" id="v-rules">
+  <p class="note">Defaults match the two-deck game you'll actually find on most floors: hand-held, dealer hits soft 17, doubling after splits, no surrender, three-to-two blackjacks, cut card around two thirds. Change anything here and the chart, the grading and the indices all follow.</p>
+  <h2 class="sec">Casino</h2>
+  <div class="box">
+    <div class="row">
+      <label for="casino-pick">Model a real game<span class="hint">Loads that table's rules, penetration, shuffle point and minimum</span></label>
+      <select id="casino-pick" style="max-width:52%"></select>
+    </div>
+    <div id="casino-card"></div>
+  </div>
+  <h2 class="sec">Table rules</h2>
+  <div class="box" id="rules-box"></div>
+  <h2 class="sec">Training</h2>
+  <div class="box" id="train-box"></div>
+  <h2 class="sec">Bet ramp</h2>
+  <p class="note">A 1–8 spread off a one-unit bottom bet. Grading accepts anything within one unit of the target.</p>
+  <div class="box"><div class="log" id="ramp-table"></div></div>
+</section>
+
+</main>
+
+<div class="scrim" id="scrim">
+  <div class="modal">
+    <h2 id="m-title">Count check</h2>
+    <p id="m-body">What's the running count right now?</p>
+    <input type="number" id="m-input" inputmode="numeric" autocomplete="off">
+    <div class="acts" style="margin-top:14px">
+      <button class="act primary" id="m-ok">Submit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Double Deck Blackjack Trainer
+   Engine, Hi-Lo counting, basic strategy, Hi-Lo indices, grading.
+   ===================================================================== */
+
+const RANKS = ['A','2','3','4','5','6','7','8','9','T','J','Q','K'];
+const SUITS = ['\u2660','\u2665','\u2666','\u2663'];
+const RED   = {'\u2665':1,'\u2666':1};
+
+const val   = r => r === 'A' ? 11 : (['T','J','Q','K'].includes(r) ? 10 : +r);
+const hiLo  = r => { const v = val(r); if (v >= 2 && v <= 6) return 1; if (v >= 7 && v <= 9) return 0; return -1; };
+const isTen = r => val(r) === 10;
+
+function totalOf(cards){
+  let t = 0, aces = 0;
+  for (const c of cards){ t += val(c.r); if (c.r === 'A') aces++; }
+  while (t > 21 && aces > 0){ t -= 10; aces--; }
+  return { total:t, soft: aces > 0 };
+}
+
+/* ---------------------------------------------------------------- state */
+const S = {
+  rules: { decks:2, h17:true, das:true, rsa:false, maxHands:3, surrender:false, bjPay:1.5, pen:0.65 },
+  casino: null, unit: 0,
+  train: { mask:true, deviations:true, checkEvery:8, gradeBets:true },
+  shoe:[], pos:0, cut:0, rc:0,
+  hands:[], dealer:[], active:0, phase:'bet',
+  bet:1, insurance:0, bank:0,
+  handsSinceCheck:0, revealed:false,
+  stats:{ hands:0, dOK:0, dTot:0, bOK:0, bTot:0, cOK:0, cTot:0, peeks:0, net:0 },
+  mistakes:[]
+};
+
+/* ---------------------------------------------------------------- shoe */
+function buildShoe(){
+  const s = [];
+  for (let d = 0; d < S.rules.decks; d++)
+    for (const su of SUITS) for (const r of RANKS) s.push({ r, s:su });
+  for (let i = s.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [s[i], s[j]] = [s[j], s[i]];
+  }
+  S.shoe = s; S.pos = 0; S.rc = 0;
+  S.cut = Math.floor(s.length * effectivePen());
+}
+/* Where the cut card lands. A notch is fixed; a hand-placed cut card wanders
+   a little; "varies by dealer" wanders a lot, which is worth training for. */
+function effectivePen(){
+  const base = S.rules.pen;
+  const j = S.casino ? PEN_JITTER[S.casino.pm] : 0;
+  if (!j) return base;
+  return Math.max(0.40, Math.min(0.88, base + (Math.random() * 2 - 1) * j));
+}
+const cardsLeft    = () => S.shoe.length - S.pos;
+const decksLeft    = () => Math.max(0.25, cardsLeft() / 52);
+const trueCount    = () => S.rc / decksLeft();
+const needsShuffle = () => S.pos >= S.cut;
+
+function draw(seen = true){
+  if (S.pos >= S.shoe.length) buildShoe();
+  const c = S.shoe[S.pos++];
+  if (seen) S.rc += hiLo(c.r);
+  c.counted = seen;
+  return c;
+}
+function reveal(c){ if (!c.counted){ S.rc += hiLo(c.r); c.counted = true; } }
+
+/* ------------------------------------------------------- basic strategy
+   The two-deck charts as published by the Wizard of Odds, using his codes:
+     H   hit
+     S   stand
+     Dh  double if allowed, otherwise hit
+     Ds  double if allowed, otherwise stand
+     P   split
+     Ph  split if double after split is allowed, otherwise hit
+     Rh  surrender if allowed, otherwise hit
+     Rs  surrender if allowed, otherwise stand
+     Rp  surrender if allowed and double after split is not, otherwise split */
+const btw = (n, a, b) => n >= a && n <= b;
+
+function hardCode(t, up, R){
+  if (t <= 8) return 'H';
+  if (t === 9)  return btw(up,2,6) ? 'Dh' : 'H';
+  if (t === 10) return btw(up,2,9) ? 'Dh' : 'H';
+  if (t === 11) return 'Dh';
+  if (t === 12) return btw(up,4,6) ? 'S' : 'H';
+  if (t === 13 || t === 14) return btw(up,2,6) ? 'S' : 'H';
+  if (t === 15){
+    if (btw(up,2,6)) return 'S';
+    if (up === 10) return 'Rh';
+    return (up === 11 && R.h17) ? 'Rh' : 'H';
+  }
+  if (t === 16){
+    if (btw(up,2,6)) return 'S';
+    return (up === 10 || up === 11) ? 'Rh' : 'H';
+  }
+  if (t === 17) return (R.h17 && up === 11) ? 'Rs' : 'S';
+  return 'S';
+}
+function softCode(t, up, R){
+  switch (t){
+    case 13: return btw(up,5,6) ? 'Dh' : 'H';
+    case 14: return (R.h17 ? btw(up,4,6) : btw(up,5,6)) ? 'Dh' : 'H';
+    case 15:
+    case 16: return btw(up,4,6) ? 'Dh' : 'H';
+    case 17: return btw(up,3,6) ? 'Dh' : 'H';
+    case 18:
+      if (R.h17) return btw(up,2,6) ? 'Ds' : (btw(up,7,8) ? 'S' : 'H');
+      return btw(up,3,6) ? 'Ds' : ((up === 2 || btw(up,7,8)) ? 'S' : 'H');
+    case 19: return (R.h17 && up === 6) ? 'Ds' : 'S';
+    default: return 'S';
+  }
+}
+/* null means the pair isn't a row on the chart — play it as a total. */
+function pairCode(p, up, R){
+  switch (p){
+    case 11: return 'P';
+    case 10: return null;
+    case 9:  return (btw(up,2,6) || up === 8 || up === 9) ? 'P' : null;
+    case 8:  return (R.h17 && up === 11) ? 'Rp' : 'P';
+    case 7:  return btw(up,2,7) ? 'P' : (up === 8 ? 'Ph' : null);
+    case 6:  return btw(up,2,6) ? 'P' : (up === 7 ? 'Ph' : null);
+    case 5:  return null;
+    case 4:  return btw(up,5,6) ? 'Ph' : null;
+    case 3:
+    case 2:  return btw(up,2,3) ? 'Ph' : (btw(up,4,7) ? 'P' : null);
+    default: return null;
+  }
+}
+const isPairOf = cards => cards.length === 2 && val(cards[0].r) === val(cards[1].r);
+const pairRankOf = cards => cards[0].r === 'A' ? 11 : val(cards[0].r);
+
+function totalCode(cards, up, R){
+  const { total, soft } = totalOf(cards);
+  return soft ? softCode(total, up, R) : hardCode(total, up, R);
+}
+/* The letter exactly as the chart prints it. Assumes the split is on offer. */
+function chartCode(cards, up, R){
+  if (isPairOf(cards)){
+    const pc = pairCode(pairRankOf(cards), up, R);
+    if (pc) return pc;
+  }
+  return totalCode(cards, up, R);
+}
+/* That letter resolved against this table's rules and this hand's options.
+   Aces you're barred from re-splitting double against 5 or 6, else hit. */
+function basicCode(cards, up, R, canSplit){
+  const aces = isPairOf(cards) && cards[0].r === 'A';
+  let code = chartCode(cards, up, R);
+  if (code === 'Ph') code = R.das ? 'P' : null;
+  if (code === 'Rp') code = (R.surrender && !R.das) ? 'Rsur' : 'P';
+  if (code === 'P' && !canSplit) code = null;
+  if (code === null) code = aces ? (btw(up,5,6) ? 'Dh' : 'H') : totalCode(cards, up, R);
+  return code;
+}
+
+/* -------------------------------------------------- Hi-Lo indices (2D)
+   The Illustrious 18, minus the entries that two-deck basic strategy
+   already covers (9 v 2 is a double on this chart, so it has no index).
+   null on a side means "whatever the chart says".                        */
+const DEVIATIONS = [
+  { k:'hard16', up:10, i:0,  above:'S',  below:null },
+  { k:'hard16', up:9,  i:5,  above:'S',  below:null },
+  { k:'hard15', up:10, i:4,  above:'S',  below:null },
+  { k:'hard13', up:2,  i:-1, above:null, below:'H' },
+  { k:'hard13', up:3,  i:-2, above:null, below:'H' },
+  { k:'hard12', up:2,  i:3,  above:'S',  below:null },
+  { k:'hard12', up:3,  i:2,  above:'S',  below:null },
+  { k:'hard12', up:4,  i:0,  above:null, below:'H' },
+  { k:'hard12', up:5,  i:-2, above:null, below:'H' },
+  { k:'hard12', up:6,  i:-1, above:null, below:'H' },
+  { k:'hard10', up:10, i:4,  above:'Dh', below:null },
+  { k:'hard10', up:11, i:3,  above:'Dh', below:null },
+  { k:'hard9',  up:7,  i:3,  above:'Dh', below:null },
+  { k:'pair10', up:5,  i:5,  above:'P',  below:null },
+  { k:'pair10', up:6,  i:4,  above:'P',  below:null }
+];
+const INSURANCE_INDEX = 3;
+
+function handKey(cards, canSplit){
+  if (canSplit && isPairOf(cards) && isTen(cards[0].r)) return 'pair10';
+  const { total, soft } = totalOf(cards);
+  return (soft ? 'soft' : 'hard') + total;
+}
+function findDeviation(cards, up, canSplit){
+  const key = handKey(cards, canSplit);
+  return DEVIATIONS.find(d => d.k === key && d.up === up) || null;
+}
+
+/* Correct play — chart first, index on top when the count has moved far
+   enough and the trainer is grading departures. */
+function correctPlay(cards, up, R, canSplit, fromSplit){
+  const basic = basicCode(cards, up, R, canSplit);
+  if (!S.train.deviations) return { code:basic, dev:null };
+  const d = findDeviation(cards, up, canSplit);
+  if (!d) return { code:basic, dev:null };
+  if (basic === 'P' && d.k !== 'pair10') return { code:basic, dev:null };
+  const tc = trueCount();
+  const raw = tc >= d.i ? d.above : d.below;
+  let code = raw === null ? basic : raw;
+  if (code === 'P' && !canSplit) code = basic;
+  return { code, dev: code !== basic ? { ...d, tc } : null };
+}
+
+function resolve(code, legal){
+  switch (code){
+    case 'Dh':   return legal.double ? 'double' : 'hit';
+    case 'Ds':   return legal.double ? 'double' : 'stand';
+    case 'Rh':   return legal.surrender ? 'surrender' : 'hit';
+    case 'Rs':   return legal.surrender ? 'surrender' : 'stand';
+    case 'Rsur': return legal.surrender ? 'surrender' : (legal.split ? 'split' : 'hit');
+    case 'P':    return legal.split ? 'split' : 'hit';
+    case 'S':    return 'stand';
+    default:     return 'hit';
+  }
+}
+const ACTION_NAME = { hit:'hit', stand:'stand', double:'double', split:'split', surrender:'surrender' };
+
+/* ------------------------------------------------------------ bet ramp */
+function targetBet(tc){
+  if (tc < 2)  return 1;
+  if (tc < 3)  return 2;
+  if (tc < 4)  return 4;
+  if (tc < 5)  return 6;
+  return 8;
+}
+const CHIP_UNITS = [1,2,4,6,8,12];
+
+/* ------------------------------------------------------------- hand ops */
+function newHand(bet, cards, fromSplit){
+  return { cards, bet, fromSplit:!!fromSplit, done:false, doubled:false,
+           surrendered:false, splitAces:false, result:null, delta:0 };
+}
+function legalFor(h){
+  const R = S.rules, { total } = totalOf(h.cards);
+  const two = h.cards.length === 2;
+  return {
+    hit: !h.done && total < 21 && !h.splitAces,
+    stand: !h.done,
+    double: !h.done && two && !h.splitAces && (!h.fromSplit || R.das),
+    split: !h.done && two && val(h.cards[0].r) === val(h.cards[1].r) &&
+           S.hands.length < R.maxHands && (!h.splitAces || R.rsa),
+    surrender: !h.done && two && !h.fromSplit && R.surrender
+  };
+}
+const isBJ = h => !h.fromSplit && h.cards.length === 2 && totalOf(h.cards).total === 21;
+
+function startHand(){
+  if (needsShuffle()){
+    if (S.train.mask && S.train.checkEvery > 0){ askCount(true); return; }
+    doShuffle();
+  }
+  if (S.train.gradeBets){
+    const t = targetBet(trueCount());
+    S.stats.bTot++;
+    const off = Math.abs(S.bet - t);
+    if (off <= 1) S.stats.bOK++;
+    else logMistake(`Bet ${S.bet}u at TC ${fmt(trueCount())} — ramp says ${t}u`);
+  }
+  S.insurance = 0; S.revealed = false;
+  S.hands = [newHand(S.bet, [draw()], false)];
+  S.dealer = [draw()];
+  S.hands[0].cards.push(draw());
+  S.dealer.push(draw(false));           // hole card — unseen, uncounted
+  S.active = 0;
+  S.phase = 'play';
+
+  if (val(S.dealer[0].r) === 11 && S.rules.bjPay){ S.phase = 'insurance'; render(); return; }
+  afterDeal();
+}
+function afterDeal(){
+  const upV = val(S.dealer[0].r);
+  if (upV === 11 || upV === 10){          // dealer peeks
+    if (totalOf(S.dealer).total === 21){ reveal(S.dealer[1]); return settle(); }
+  }
+  if (isBJ(S.hands[0])){ S.hands[0].done = true; reveal(S.dealer[1]); return settle(); }
+  S.phase = 'play';
+  render();
+}
+
+function act(action){
+  const h = S.hands[S.active];
+  if (!h || h.done) return;
+  const legal = legalFor(h);
+  const up = val(S.dealer[0].r);
+  const canSplit = legal.split;
+
+  const { code, dev } = correctPlay(h.cards, up, S.rules, canSplit, h.fromSplit);
+  const want = resolve(code, legal);
+
+  S.stats.dTot++;
+  if (action === want){
+    S.stats.dOK++;
+    if (dev) feedback('dev', 'Index play',
+      `Right. <b>${describe(h.cards, up)}</b> flips to ${ACTION_NAME[want]} at true ${fmtIdx(dev.i)}; you're at ${fmt(dev.tc)}.`);
+    else feedback('good', 'Correct', `Basic strategy plays <b>${describe(h.cards, up)}</b> as ${ACTION_NAME[want]}.`);
+  } else {
+    const why = dev
+      ? `The index takes over here — ${ACTION_NAME[want]} from true ${fmtIdx(dev.i)} up, and you're at ${fmt(dev.tc)}.`
+      : `Basic strategy plays <b>${describe(h.cards, up)}</b> as ${ACTION_NAME[want]}.`;
+    feedback('bad', `Should have ${ACTION_NAME[want]}`, why);
+    logMistake(`${describe(h.cards, up)} @ TC ${fmt(trueCount())} — played ${action}, correct ${want}`);
+  }
+
+  apply(action, h);
+}
+
+function apply(action, h){
+  switch (action){
+    case 'hit':
+      h.cards.push(draw());
+      if (totalOf(h.cards).total >= 21) h.done = true;
+      break;
+    case 'stand':   h.done = true; break;
+    case 'double':  h.bet *= 2; h.doubled = true; h.cards.push(draw()); h.done = true; break;
+    case 'surrender': h.surrendered = true; h.done = true; break;
+    case 'split': {
+      const c = h.cards.pop();
+      const nh = newHand(S.bet, [c], true);
+      const aces = h.cards[0].r === 'A';
+      h.fromSplit = true;
+      h.cards.push(draw());
+      nh.cards.push(draw());
+      S.hands.splice(S.active + 1, 0, nh);
+      if (aces){
+        h.splitAces = nh.splitAces = true;
+        const canResplit = S.rules.rsa && S.hands.length < S.rules.maxHands;
+        for (const x of [h, nh]) x.done = !(canResplit && x.cards[1].r === 'A');
+      }
+      break;
+    }
+  }
+  advance();
+}
+function advance(){
+  while (S.active < S.hands.length && S.hands[S.active].done) S.active++;
+  if (S.active >= S.hands.length) return dealerTurn();
+  render();
+}
+
+function dealerTurn(){
+  reveal(S.dealer[1]);
+  const live = S.hands.some(h => !h.surrendered && totalOf(h.cards).total <= 21);
+  if (live){
+    for (;;){
+      const { total, soft } = totalOf(S.dealer);
+      if (total < 17 || (total === 17 && soft && S.rules.h17)) S.dealer.push(draw());
+      else break;
+    }
+  }
+  settle();
+}
+
+function settle(){
+  S.phase = 'settle';
+  const dealerBJ = S.dealer.length === 2 && totalOf(S.dealer).total === 21;
+  const dt = totalOf(S.dealer).total;
+  let net = 0;
+
+  if (S.insurance){
+    const win = dealerBJ ? S.insurance * 2 : -S.insurance;
+    net += win;
+  }
+  for (const h of S.hands){
+    const pt = totalOf(h.cards).total;
+    if (h.surrendered){ h.result = 'surrender'; h.delta = -h.bet / 2; }
+    else if (isBJ(h) && !dealerBJ){ h.result = 'blackjack'; h.delta = h.bet * S.rules.bjPay; }
+    else if (isBJ(h) && dealerBJ){ h.result = 'push'; h.delta = 0; }
+    else if (dealerBJ){ h.result = 'lose'; h.delta = -h.bet; }
+    else if (pt > 21){ h.result = 'bust'; h.delta = -h.bet; }
+    else if (dt > 21 || pt > dt){ h.result = 'win'; h.delta = h.bet; }
+    else if (pt === dt){ h.result = 'push'; h.delta = 0; }
+    else { h.result = 'lose'; h.delta = -h.bet; }
+    net += h.delta;
+  }
+  S.bank += net; S.stats.net += net; S.stats.hands++;
+  S.handsSinceCheck++;
+
+  const parts = S.hands.map(h => `${h.result}${h.delta ? ' ' + fmtU(h.delta) : ''}`).join(' · ');
+  feedback(net > 0 ? 'good' : (net < 0 ? 'bad' : ''),
+    net > 0 ? `Won ${fmtU(net)}` : (net < 0 ? `Lost ${fmtU(-net)}` : 'Push'),
+    `Dealer ${dt > 21 ? 'busts' : dt}. ${parts}.`);
+
+  S.phase = 'done';
+  render();
+
+  if (S.train.checkEvery > 0 && S.handsSinceCheck >= S.train.checkEvery) setTimeout(() => askCount(false), 500);
+}
+
+function takeInsurance(yes){
+  const tc = trueCount();
+  const should = tc >= INSURANCE_INDEX;
+  S.stats.dTot++;
+  if (yes === should){
+    S.stats.dOK++;
+    feedback('dev', 'Correct',
+      should ? `Insurance is on at true +${INSURANCE_INDEX} or better. You're at ${fmt(tc)}.`
+             : `Pass. Insurance only turns positive at true +${INSURANCE_INDEX}; you're at ${fmt(tc)}.`);
+  } else {
+    feedback('bad', should ? 'Should have insured' : 'Should have passed',
+      `Insurance is a bet on tens. It only pays at true +${INSURANCE_INDEX} or better — you're at ${fmt(tc)}.`);
+    logMistake(`Insurance ${yes ? 'taken' : 'declined'} at TC ${fmt(tc)}`);
+  }
+  if (yes) S.insurance = S.hands[0].bet / 2;
+  S.phase = 'play';
+  afterDeal();
+}
+
+function doShuffle(){
+  buildShoe();
+  S.handsSinceCheck = 0;
+  feedback('', 'Shuffle', 'Fresh two decks. Count resets to zero.');
+}
+
+/* ------------------------------------------------------------ feedback */
+function feedback(cls, verdict, why){
+  const el = document.getElementById('fb');
+  el.className = 'fb ' + cls;
+  el.innerHTML = `<span class="verdict">${verdict}</span><span class="why">${why}</span>`;
+}
+function logMistake(txt){
+  S.mistakes.unshift({ n:S.stats.hands + 1, txt });
+  if (S.mistakes.length > 60) S.mistakes.pop();
+}
+function describe(cards, up){
+  const { total, soft } = totalOf(cards);
+  const upn = up === 11 ? 'A' : up;
+  if (cards.length === 2 && val(cards[0].r) === val(cards[1].r)){
+    const r = cards[0].r === 'A' ? 'A' : (isTen(cards[0].r) ? '10' : cards[0].r);
+    return `${r},${r} v ${upn}`;
+  }
+  if (soft) return `soft ${total} v ${upn}`;
+  return `${total} v ${upn}`;
+}
+const fmt    = n => (n >= 0 ? '+' : '') + n.toFixed(1);
+const fmtIdx = n => (n >= 0 ? '+' : '') + n;
+const fmtU   = n => (Number.isInteger(n) ? n : n.toFixed(1)) + 'u';
+
+/* --------------------------------------------------------------- render */
+function cardEl(c, faceDown){
+  if (faceDown) return `<div class="card back"></div>`;
+  const red = RED[c.s] ? ' red' : '';
+  const rank = c.r === 'T' ? '10' : c.r;
+  return `<div class="card${red}"><span class="rk">${rank}</span><span class="su">${c.s}</span></div>`;
+}
+function render(){
+  const hideHole = S.phase === 'play' || S.phase === 'insurance';
+  document.getElementById('d-cards').innerHTML =
+    S.dealer.map((c, i) => cardEl(c, hideHole && i === 1)).join('') || '<span class="empty">—</span>';
+  const dt = totalOf(hideHole ? S.dealer.slice(0, 1) : S.dealer);
+  document.getElementById('d-tot').textContent = S.dealer.length ? (hideHole ? `showing ${dt.total}` : dt.total) : '';
+
+  document.getElementById('p-hands').innerHTML = S.hands.length
+    ? S.hands.map((h, i) => {
+        const t = totalOf(h.cards);
+        const cls = S.phase === 'play' && i === S.active ? ' active'
+          : (h.result === 'win' || h.result === 'blackjack' ? ' settled-win'
+          : (h.result ? ' settled-lose' : ''));
+        const label = isBJ(h) ? 'blackjack' : (t.soft ? 'soft ' : '') + t.total + (t.total > 21 ? ' bust' : '');
+        return `<div class="hand${cls}"><div class="cards">${h.cards.map(c => cardEl(c)).join('')}</div>
+                <div class="hand-meta"><span>${label}</span><span>${h.bet}u</span>
+                ${h.result ? `<span>${h.result}</span>` : ''}</div></div>`;
+      }).join('')
+    : '<span class="empty">—</span>';
+  document.getElementById('p-bank').textContent =
+    `${S.bank >= 0 ? '+' : ''}${S.bank.toFixed(1)}u session` +
+    (S.unit ? `  (${S.bank >= 0 ? '+' : '\u2212'}$${Math.abs(S.bank * S.unit).toFixed(0)})` : '');
+
+  renderActs();
+  renderRail();
+  renderStrip();
+}
+function renderActs(){
+  const box = document.getElementById('acts');
+  const B = (id, label, key, dis, primary) =>
+    `<button class="act${primary ? ' primary' : ''}" data-act="${id}" ${dis ? 'disabled' : ''}>${label}<span class="key">${key}</span></button>`;
+
+  if (S.phase === 'insurance'){
+    box.innerHTML = B('ins-yes', 'Insure', 'Y', false, false) + B('ins-no', 'No insurance', 'N', false, true);
+    return;
+  }
+  if (S.phase === 'play'){
+    const l = legalFor(S.hands[S.active]);
+    box.innerHTML =
+      B('hit', 'Hit', 'H', !l.hit) + B('stand', 'Stand', 'S', !l.stand) +
+      B('double', 'Double', 'D', !l.double) + B('split', 'Split', 'P', !l.split) +
+      (S.rules.surrender ? B('surrender', 'Surrender', 'R', !l.surrender) : '');
+    return;
+  }
+  box.innerHTML = B('deal', S.hands.length ? 'Next hand' : 'Deal', 'space', false, true);
+}
+function renderRail(){
+  const show = !S.train.mask || S.revealed || S.phase === 'bet';
+  const body = document.getElementById('count-body');
+  body.classList.toggle('masked', !show);
+  document.getElementById('rc').textContent = fmtIdx(S.rc);
+  document.getElementById('tc').textContent = fmt(trueCount());
+
+  const dealt = S.pos, tot = S.shoe.length || 104;
+  document.getElementById('tray-fill').style.height = (dealt / tot * 100) + '%';
+  document.getElementById('tray-cut').style.bottom = (S.cut / tot * 100) + '%';
+  document.getElementById('decks-left').textContent = decksLeft().toFixed(2);
+  document.getElementById('discards').textContent = dealt;
+
+  document.getElementById('chips').innerHTML = CHIP_UNITS
+    .map(u => `<button class="chip${u === S.bet ? ' sel' : ''}" data-c="${u}" data-bet="${u}" ` +
+      `title="${u} unit${u > 1 ? 's' : ''}">${S.unit ? '$' + (u * S.unit) : u}</button>`).join('');
+  document.getElementById('chip-label').textContent = S.unit ? `Your bet \u2014 $${S.unit} units` : 'Your bet \u2014 units';
+}
+function renderStrip(){
+  const st = S.stats;
+  const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+  const cells = [
+    ['Hands', st.hands],
+    ['Play', pct(st.dOK, st.dTot)],
+    ['Bets', S.train.gradeBets ? pct(st.bOK, st.bTot) : '—'],
+    ['Count', pct(st.cOK, st.cTot)],
+    ['Peeks', st.peeks],
+    ['Net', (st.net >= 0 ? '+' : '') + st.net.toFixed(1) + 'u']
+  ];
+  const html = cells.map(([k, v], i) => {
+    const cls = i === 5 ? (st.net > 0 ? ' pos' : (st.net < 0 ? ' neg' : '')) : '';
+    return `<div class="stat"><div class="k">${k}</div><div class="v${cls}">${v}</div></div>`;
+  }).join('');
+  document.getElementById('strip').innerHTML = html;
+  document.getElementById('strip2').innerHTML = html;
+  document.getElementById('mistake-log').innerHTML = S.mistakes.length
+    ? S.mistakes.map(m => `<div>#${m.n} <b>${m.txt}</b></div>`).join('')
+    : '<span class="empty">Nothing logged yet.</span>';
+}
+
+/* ---------------------------------------------------------- count check */
+let pendingShuffle = false;
+function askCount(beforeShuffle){
+  pendingShuffle = beforeShuffle;
+  document.getElementById('m-title').textContent = beforeShuffle ? 'Last count before the shuffle' : 'Count check';
+  document.getElementById('m-body').textContent = 'What is the running count right now?';
+  const inp = document.getElementById('m-input');
+  inp.value = '';
+  document.getElementById('scrim').classList.add('on');
+  setTimeout(() => inp.focus(), 40);
+}
+function submitCount(){
+  const inp = document.getElementById('m-input');
+  const guess = parseInt(inp.value, 10);
+  if (Number.isNaN(guess)) { inp.focus(); return; }
+  S.stats.cTot++;
+  const right = guess === S.rc;
+  if (right) S.stats.cOK++;
+  else logMistake(`Count check — said ${fmtIdx(guess)}, actual ${fmtIdx(S.rc)}`);
+  document.getElementById('scrim').classList.remove('on');
+  S.handsSinceCheck = 0;
+
+  feedback(right ? 'good' : 'bad',
+    right ? 'Count is good' : 'Count is off',
+    right ? `Running ${fmtIdx(S.rc)}, true ${fmt(trueCount())} with ${decksLeft().toFixed(2)} decks behind the cut.`
+          : `Running count is <b>${fmtIdx(S.rc)}</b>, not ${fmtIdx(guess)}. True count ${fmt(trueCount())}.`);
+
+  if (pendingShuffle){ pendingShuffle = false; doShuffle(); }
+  renderStrip(); renderRail();
+}
+
+/* -------------------------------------------------------------- wiring */
+document.addEventListener('click', e => {
+  const tab = e.target.closest('nav button[data-tab]');
+  if (tab){
+    document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-selected', String(b === tab)));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + tab.dataset.tab));
+    if (tab.dataset.tab === 'chart') buildCharts();
+    return;
+  }
+  const chip = e.target.closest('.chip');
+  if (chip){ S.bet = +chip.dataset.bet; renderRail(); return; }
+
+  const a = e.target.closest('[data-act]');
+  if (a && !a.disabled){
+    const id = a.dataset.act;
+    if (id === 'deal') startHand();
+    else if (id === 'ins-yes') takeInsurance(true);
+    else if (id === 'ins-no') takeInsurance(false);
+    else act(id);
+    return;
+  }
+  const sw = e.target.closest('.sw');
+  if (sw && sw.dataset.key){ toggleSetting(sw); return; }
+});
+
+document.getElementById('peek-btn').addEventListener('click', () => {
+  S.stats.peeks++; S.revealed = true; renderRail(); renderStrip();
+  setTimeout(() => { S.revealed = false; renderRail(); }, 3000);
+});
+document.getElementById('m-ok').addEventListener('click', submitCount);
+document.getElementById('m-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitCount(); });
+document.getElementById('reset-stats').addEventListener('click', () => {
+  S.stats = { hands:0, dOK:0, dTot:0, bOK:0, bTot:0, cOK:0, cTot:0, peeks:0, net:0 };
+  S.mistakes = []; S.bank = 0; renderStrip();
+});
+
+document.addEventListener('keydown', e => {
+  if (document.getElementById('scrim').classList.contains('on')) return;
+  if (e.target.matches('input,select')) return;
+  const k = e.key.toLowerCase();
+  const map = { h:'hit', s:'stand', d:'double', p:'split', r:'surrender' };
+  if (k === ' ' || k === 'enter'){
+    const btn = document.querySelector('[data-act="deal"]');
+    if (btn){ e.preventDefault(); startHand(); }
+    return;
+  }
+  if (S.phase === 'insurance'){
+    if (k === 'y') takeInsurance(true);
+    if (k === 'n') takeInsurance(false);
+    return;
+  }
+  if (S.phase === 'play' && map[k]){
+    const btn = document.querySelector(`[data-act="${map[k]}"]`);
+    if (btn && !btn.disabled) act(map[k]);
+  }
+});
+
+/* -------------------------------------------------------------- charts */
+const CODE_CLASS = { H:'H', S:'S', Dh:'D', Ds:'D', P:'P', Ph:'P', Rh:'R', Rs:'R', Rp:'R' };
+function chartTable(rows, labelFn, cardsFn){
+  const ups = [2,3,4,5,6,7,8,9,10,11];
+  let h = '<table class="chart"><thead><tr><th></th>' +
+    ups.map(u => `<th>${u === 11 ? 'A' : u}</th>`).join('') + '</tr></thead><tbody>';
+  for (const row of rows){
+    h += `<tr><th class="rowh">${labelFn(row)}</th>`;
+    for (const u of ups){
+      const code = chartCode(cardsFn(row), u, S.rules);
+      h += `<td class="a-${CODE_CLASS[code]}">${code}</td>`;
+    }
+    h += '</tr>';
+  }
+  return h + '</tbody></table>';
+}
+const C = (r) => ({ r, s:'\u2660' });
+function buildCharts(){
+  const R = S.rules;
+  document.getElementById('chart-caption').textContent =
+    `Two decks \u00b7 dealer ${R.h17 ? 'hits' : 'stands on'} soft 17 \u00b7 ` +
+    `${R.das ? 'doubling after splits' : 'no doubling after splits'} \u00b7 ` +
+    `${R.surrender ? 'late surrender' : 'no surrender'} \u00b7 blackjack pays ${R.bjPay === 1.5 ? '3:2' : '6:5'}. ` +
+    `Cells show the chart letter, not the rule-adjusted play \u2014 the trainer does that adjustment when it grades you.`;
+
+  const hardRows = [];
+  for (let t = 5; t <= 20; t++) hardRows.push(t);
+  document.getElementById('chart-hard').innerHTML = chartTable(hardRows, t => t, t => hardCards(t));
+
+  document.getElementById('chart-soft').innerHTML = chartTable(
+    [2,3,4,5,6,7,8,9], r => `A,${r}`, r => [C('A'), C(String(r))]);
+
+  document.getElementById('chart-pair').innerHTML = chartTable(
+    ['2','3','4','6','7','8','9','A'],
+    r => `${r},${r}`, r => [C(r), C(r)]);
+
+  document.getElementById('chart-dev').innerHTML = devTable();
+}
+/* Build a hard total from cards that aren't a pair and aren't soft. */
+function hardCards(t){
+  if (t <= 11){
+    for (let a = 2; a < t; a++){ const b = t - a; if (b >= 2 && b <= 9 && a !== b) return [C(String(a)), C(String(b))]; }
+    return [C('2'), C(String(t - 2))];
+  }
+  for (let a = 2; a <= 9; a++){ const b = t - a; if (b >= 2 && b <= 10 && a !== b) return [C(String(a)), C(b === 10 ? 'K' : String(b))]; }
+  return [C('T'), C(t - 10 === 10 ? 'K' : String(t - 10))];
+}
+function devTable(){
+  const label = k => k === 'pair10' ? '10,10' : k.replace('hard','').replace('soft','soft ');
+  const nm = c => ({ H:'hit', S:'stand', Dh:'double', P:'split' })[c] || c;
+  const rows = DEVIATIONS.map(d => {
+    const hi = d.above === null ? 'chart play' : nm(d.above);
+    const lo = d.below === null ? 'chart play' : nm(d.below);
+    return `<div><span style="color:var(--txt)">${label(d.k)} v ${d.up === 11 ? 'A' : d.up}</span>` +
+      ` &nbsp;\u00b7&nbsp; <span style="color:var(--cut)">${hi} at ${fmtIdx(d.i)} and up</span>` +
+      ` &nbsp;\u00b7&nbsp; ${lo} below`;
+  }).join('');
+  return `<div class="log"><div><span style="color:var(--txt)">Insurance</span> &nbsp;\u00b7&nbsp; ` +
+         `<span style="color:var(--cut)">take at +${INSURANCE_INDEX} and up</span> &nbsp;\u00b7&nbsp; never below</div>${rows}</div>`;
+}
+
+/* --------------------------------------------------------------- casinos
+   Double-deck 3:2 games in the Las Vegas valley. Figures from the Wizard of
+   Vegas survey (source: Current Blackjack News), January 2025 — verify at the
+   table before you sit. "cut" is decks left unseen at the shuffle, so a 0.5
+   cut on two decks is 75% penetration.
+     pm  notch = fixed by a physical notch, sc = cut card, pv = varies by dealer
+     deal  pitch = hand-held and face down, shoe = dealt face up from a shoe  */
+const CASINOS = [
+  // --- stand on soft 17, double after split ---
+  {n:'Aria',              a:'Strip',    h17:0,das:1,cut:0.5,pm:'pv',   min:500,max:10000,t:2, deal:'pitch',edge:0.19,note:'Quick to back off'},
+  {n:'Bellagio',          a:'Strip',    h17:0,das:1,cut:0.6,pm:'sc',   min:300,max:10000,t:1, deal:'shoe', edge:0.19,note:'Sometimes drops to $100 when slow'},
+  {n:'Cosmopolitan',      a:'Strip',    h17:0,das:1,cut:0.5,pm:'sc',   min:200,max:10000,t:1, deal:'pitch',edge:0.19,note:''},
+  {n:'Fontainebleau',     a:'Strip',    h17:0,das:1,cut:0.5,pm:'notch',min:300,max:10000,t:2, deal:'shoe', edge:0.19,note:''},
+  {n:'Mandalay Bay',      a:'Strip',    h17:0,das:1,cut:0.6,pm:'notch',min:100,max:10000,t:2, deal:'pitch',edge:0.19,note:''},
+  {n:'MGM Grand',         a:'Strip',    h17:0,das:1,cut:0.6,pm:'sc',   min:500,max:10000,t:1, deal:'pitch',edge:0.19,note:'Uses a six-deck discard tray — estimation is harder'},
+  {n:'Park MGM',          a:'Strip',    h17:0,das:1,cut:0.6,pm:'notch',min:100,max:10000,t:2, deal:'shoe', edge:0.19,note:'Entire casino is non-smoking'},
+  {n:'Treasure Island',   a:'Strip',    h17:0,das:1,cut:0.6,pm:'notch',min:50, max:5000, t:3, deal:'shoe', edge:0.19,note:'Cheapest way into the best rule set'},
+  {n:'Palms',             a:'Locals',   h17:0,das:1,cut:0.5,pm:'sc',   min:100,max:5000, t:1, deal:'pitch',edge:0.19,note:'Quick to back off'},
+
+  // --- hits soft 17, double after split ---
+  {n:'Aliante',           a:'Locals',   h17:1,das:1,cut:0.7,pm:'pv',   min:10, max:1000, t:13,deal:'pitch',edge:0.40,note:''},
+  {n:"Arizona Charlie's", a:'Locals',   h17:1,das:1,cut:0.8,pm:'notch',min:10, max:500,  t:3, deal:'shoe', edge:0.40,note:'Quick to back off at any stakes'},
+  {n:'Boulder Station',   a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:10, max:2000, t:8, deal:'shoe', edge:0.40,note:'Quick to back off at any stakes'},
+  {n:'Cannery',           a:'Locals',   h17:1,das:1,cut:0.6,pm:'pv',   min:10, max:1000, t:9, deal:'pitch',edge:0.40,note:''},
+  {n:'Durango',           a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:15, max:3000, t:10,deal:'shoe', edge:0.40,note:''},
+  {n:'Durango high limit',a:'Locals',   h17:1,das:1,rsa:1,cut:0.5,pm:'notch',min:100,max:10000,t:3,deal:'shoe',edge:0.35,note:'Resplit aces allowed'},
+  {n:'Gold Coast',        a:'Locals',   h17:1,das:1,cut:0.9,pm:'pv',   min:15, max:2000, t:3, deal:'pitch',edge:0.40,note:'Thin penetration'},
+  {n:'Green Valley Ranch',a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:15, max:10000,t:10,deal:'shoe', edge:0.40,note:''},
+  {n:"Jerry's Nugget",    a:'Locals',   h17:1,das:1,cut:0.9,pm:'pv',   min:5,  max:300,  t:2, deal:'shoe', edge:0.40,note:'$5 minimum but a $300 max kills the spread'},
+  {n:'M Resort',          a:'Locals',   h17:1,das:1,cut:0.8,pm:'pv',   min:15, max:3000, t:4, deal:'pitch',edge:0.40,note:'No sitting out hands'},
+  {n:'Orleans',           a:'Locals',   h17:1,das:1,cut:0.8,pm:'pv',   min:15, max:1000, t:10,deal:'pitch',edge:0.40,note:''},
+  {n:'Palace Station',    a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:25, max:10000,t:3, deal:'shoe', edge:0.40,note:'Quick to back off'},
+  {n:'Rampart',           a:'Locals',   h17:1,das:1,cut:0.7,pm:'notch',min:10, max:2000, t:12,deal:'shoe', edge:0.40,note:'Two hands without doubling the minimum'},
+  {n:'Red Rock',          a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:15, max:10000,t:14,deal:'shoe', edge:0.40,note:''},
+  {n:"Sam's Town",        a:'Locals',   h17:1,das:1,cut:0.9,pm:'pv',   min:10, max:2000, t:12,deal:'shoe', edge:0.40,note:'Closed 4am–10am weekdays'},
+  {n:'Santa Fe Station',  a:'Locals',   h17:1,das:1,cut:0.5,pm:'notch',min:15, max:2000, t:10,deal:'shoe', edge:0.40,note:'Quick to back off green and black'},
+  {n:'Suncoast',          a:'Locals',   h17:1,das:1,cut:0.5,pm:'sc',   min:10, max:2000, t:11,deal:'pitch',edge:0.40,note:'Sweats green action'},
+  {n:'Sunset Station',    a:'Locals',   h17:1,das:1,cut:0.5,pm:'sc',   min:10, max:2000, t:7, deal:'shoe', edge:0.40,note:'No mid-shoe entry or spreading to two hands'},
+  {n:'Virgin',            a:'Locals',   h17:1,das:1,cut:0.9,pm:'sc',   min:25, max:1000, t:1, deal:'pitch',edge:0.40,note:''},
+  {n:'Westgate',          a:'Locals',   h17:1,das:1,cut:0.7,pm:'pv',   min:25, max:5000, t:2, deal:'pitch',edge:0.40,note:''},
+
+  {n:'California',        a:'Downtown', h17:1,das:1,cut:1.0,pm:'sc',   min:15, max:1000, t:10,deal:'pitch',edge:0.40,note:'Half the pack behind the cut card'},
+  {n:'Circa',             a:'Downtown', h17:1,das:1,cut:0.6,pm:'sc',   min:200,max:10000,t:2, deal:'pitch',edge:0.40,note:'ID checked at the door'},
+  {n:'El Cortez',         a:'Downtown', h17:1,das:1,cut:0.9,pm:'pv',   min:25, max:2000, t:2, deal:'shoe', edge:0.40,note:'Quick to back off, sweats green'},
+  {n:'Fremont',           a:'Downtown', h17:1,das:1,cut:0.8,pm:'sc',   min:15, max:1000, t:2, deal:'pitch',edge:0.40,note:''},
+  {n:'Golden Gate',       a:'Downtown', h17:1,das:1,cut:0.8,pm:'sc',   min:50, max:2500, t:1, deal:'shoe', edge:0.40,note:'ID checked at the door'},
+  {n:'Golden Nugget',     a:'Downtown', h17:1,das:1,cut:0.5,pm:'sc',   min:100,max:5000, t:4, deal:'pitch',edge:0.40,note:'Best penetration downtown'},
+  {n:'Main Street Station',a:'Downtown',h17:1,das:1,cut:0.9,pm:'pv',   min:15, max:500,  t:2, deal:'pitch',edge:0.40,note:'Open Fri–Sun only'},
+  {n:'Plaza',             a:'Downtown', h17:1,das:1,cut:1.0,pm:'sc',   min:25, max:2000, t:2, deal:'pitch',edge:0.40,note:'Quick to back off green and black'},
+  {n:'The D',             a:'Downtown', h17:1,das:1,cut:0.7,pm:'pv',   min:100,max:5000, t:1, deal:'pitch',edge:0.40,note:'ID checked at the door'},
+
+  {n:'Caesars Palace',    a:'Strip',    h17:1,das:1,cut:1.0,pm:'pv',   min:200,max:10000,t:2, deal:'pitch',edge:0.40,note:''},
+  {n:'Encore',            a:'Strip',    h17:1,das:1,cut:0.6,pm:'notch',min:100,max:10000,t:2, deal:'shoe', edge:0.40,note:''},
+  {n:'Luxor',             a:'Strip',    h17:1,das:1,cut:0.6,pm:'sc',   min:50, max:5000, t:1, deal:'shoe', edge:0.40,note:'High-limit tables rarely open'},
+  {n:'New York-New York', a:'Strip',    h17:1,das:1,cut:0.7,pm:'sc',   min:200,max:5000, t:1, deal:'shoe', edge:0.40,note:'Quick to back off'},
+  {n:'Palazzo',           a:'Strip',    h17:1,das:1,cut:0.8,pm:'sc',   min:200,max:10000,t:5, deal:'pitch',edge:0.40,note:''},
+  {n:'Resorts World',     a:'Strip',    h17:1,das:1,cut:0.7,pm:'sc',   min:100,max:10000,t:1, deal:'shoe', edge:0.40,note:'Quick to back off'},
+  {n:'Sahara',            a:'Strip',    h17:1,das:1,cut:0.6,pm:'sc',   min:100,max:3000, t:1, deal:'pitch',edge:0.40,note:'Weekends only, high-limit room'},
+  {n:'STRAT',             a:'Strip',    h17:1,das:1,cut:0.5,pm:'notch',min:25, max:2000, t:3, deal:'shoe', edge:0.40,note:'Sweats green action'},
+  {n:'Treasure Island H17',a:'Strip',   h17:1,das:1,cut:0.8,pm:'notch',min:15, max:2000, t:4, deal:'shoe', edge:0.40,note:''},
+  {n:'Venetian',          a:'Strip',    h17:1,das:1,cut:1.0,pm:'notch',min:300,max:10000,t:2, deal:'shoe', edge:0.40,note:''},
+  {n:'Wynn',              a:'Strip',    h17:1,das:1,cut:0.7,pm:'notch',min:200,max:10000,t:7, deal:'shoe', edge:0.40,note:''},
+
+  // --- hits soft 17, NO double after split ---
+  {n:'South Point',       a:'No DAS',   h17:1,das:0,cut:0.8,pm:'pv',   min:10, max:2000, t:26,deal:'pitch',edge:0.53,note:'26 tables of it — looks friendly, is not'},
+  {n:'El Cortez main pit',a:'No DAS',   h17:1,das:0,cut:0.9,pm:'pv',   min:15, max:2000, t:12,deal:'shoe', edge:0.53,note:''},
+  {n:'Silverton',         a:'No DAS',   h17:1,das:0,cut:0.8,pm:'pv',   min:15, max:1000, t:3, deal:'shoe', edge:0.53,note:'Sweats green action'},
+  {n:'Planet Hollywood',  a:'No DAS',   h17:1,das:0,cut:0.7,pm:'sc',   min:25, max:5000, t:3, deal:'pitch',edge:0.53,note:''},
+  {n:'Linq',              a:'No DAS',   h17:1,das:0,cut:0.8,pm:'pv',   min:50, max:3000, t:1, deal:'pitch',edge:0.53,note:''},
+  {n:'Flamingo',          a:'No DAS',   h17:1,das:0,cut:0.5,pm:'pv',   min:100,max:5000, t:2, deal:'pitch',edge:0.53,note:'Good penetration, poor rules'},
+  {n:"Harrah's",          a:'No DAS',   h17:1,das:0,cut:0.7,pm:'sc',   min:100,max:5000, t:2, deal:'pitch',edge:0.53,note:''},
+  {n:'Horseshoe',         a:'No DAS',   h17:1,das:0,cut:0.7,pm:'sc',   min:100,max:5000, t:2, deal:'pitch',edge:0.53,note:'High-limit room only'},
+  {n:'Paris',             a:'No DAS',   h17:1,das:0,cut:0.6,pm:'sc',   min:100,max:5000, t:2, deal:'pitch',edge:0.53,note:'No sitting out hands'}
+];
+const AREAS = ['Locals','Downtown','Strip','No DAS'];
+const AREA_LABEL = { Locals:'Locals and off-Strip', Downtown:'Downtown', Strip:'The Strip', 'No DAS':'No double after split — avoid' };
+const PEN_JITTER = { notch:0, sc:0.025, pv:0.075 };
+
+const penOf   = c => (2 - c.cut) / 2;
+const breakEven = c => c.edge / 0.5;
+
+function applyCasino(c){
+  S.casino = c;
+  S.rules.h17 = !!c.h17;
+  S.rules.das = !!c.das;
+  S.rules.rsa = !!c.rsa;
+  S.rules.pen = penOf(c);
+  S.rules.bjPay = 1.5;
+  S.rules.maxHands = 4;
+  S.unit = c.min;
+  S.hands = []; S.dealer = []; S.phase = 'bet';
+  buildShoe();
+  S.handsSinceCheck = 0;
+  buildSettings(); buildCharts(); renderCasinoCard(); render();
+  feedback('', c.n, `${c.h17 ? 'Hits' : 'Stands on'} soft 17 \u00b7 ${c.das ? 'double after splits' : 'no double after splits'} \u00b7 ` +
+    `${Math.round(penOf(c) * 100)}% penetration \u00b7 $${c.min} minimum.`);
+}
+
+function buildCasinoPicker(){
+  const sel = document.getElementById('casino-pick');
+  let h = '<option value="-1">Custom table</option>';
+  for (const a of AREAS){
+    h += `<optgroup label="${AREA_LABEL[a]}">`;
+    CASINOS.map((c, i) => ({ c, i })).filter(x => x.c.a === a)
+      .sort((x, y) => x.c.n.localeCompare(y.c.n))
+      .forEach(x => { h += `<option value="${x.i}">${x.c.n} \u2014 $${x.c.min}, ${Math.round(penOf(x.c)*100)}% pen</option>`; });
+    h += '</optgroup>';
+  }
+  sel.innerHTML = h;
+  sel.addEventListener('change', e => {
+    const i = +e.target.value;
+    if (i < 0){ S.casino = null; renderCasinoCard(); render(); return; }
+    applyCasino(CASINOS[i]);
+  });
+  renderCasinoCard();
+}
+
+function renderCasinoCard(){
+  const el = document.getElementById('casino-card');
+  const c = S.casino;
+  if (!c){
+    el.innerHTML = '<p class="note" style="margin:10px 0 0">No casino loaded — the table below is whatever you set it to.</p>';
+    updateBrand(); return;
+  }
+  const rules = [`${c.h17 ? 'Hits' : 'Stands on'} soft 17`, c.das ? 'Double after splits' : 'No double after splits',
+                 c.rsa ? 'Resplit aces' : null].filter(Boolean).join(' \u00b7 ');
+  const penMode = { notch:'fixed by a notch', sc:'set by a cut card', pv:'varies by dealer' }[c.pm];
+  const row = (k, v) => `<div class="readout"><span class="k">${k}</span><span class="v sm mono">${v}</span></div>`;
+  el.innerHTML =
+    `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft)">
+      <p class="note" style="margin:0 0 10px">${rules}. ${c.deal === 'pitch' ? 'Hand-held and dealt face down.' : 'Dealt face up from a shoe.'} ${c.note ? c.note + '.' : ''}</p>
+      ${row('Penetration', Math.round(penOf(c)*100) + '%  (' + c.cut.toFixed(1) + ' decks cut)')}
+      ${row('Shuffle point', penMode)}
+      ${row('Table', '$' + c.min + ' to $' + c.max.toLocaleString())}
+      ${row('Tables', c.t)}
+      ${row('Off the top', c.edge.toFixed(2) + '%')}
+      ${row('Turns positive at', 'true +' + breakEven(c).toFixed(1))}
+    </div>`;
+  updateBrand();
+}
+function updateBrand(){
+  const c = S.casino;
+  const el = document.getElementById('brand');
+  if (!c){ el.innerHTML = '<b>DOUBLE DECK</b> \u00b7 TRAINER'; return; }
+  el.innerHTML = `<b>${c.n.toUpperCase()}</b> \u00b7 ${c.h17 ? 'H17' : 'S17'}${c.das ? ' DAS' : ' NDAS'} \u00b7 ` +
+    `${Math.round(penOf(c)*100)}% \u00b7 $${c.min}`;
+}
+
+/* ------------------------------------------------------------ settings */
+const RULE_DEFS = [
+  { key:'h17', kind:'sw', label:'Dealer hits soft 17', hint:'Standard on nearly every two-deck game now' },
+  { key:'das', kind:'sw', label:'Double after split', hint:'' },
+  { key:'rsa', kind:'sw', label:'Resplit aces', hint:'Rare — Durango high limit is the one on this list' },
+  { key:'surrender', kind:'sw', label:'Late surrender', hint:'Never offered on Las Vegas double deck' },
+  { key:'maxHands', kind:'sel', label:'Split up to', hint:'', opts:[[2,'2 hands'],[3,'3 hands'],[4,'4 hands']] },
+  { key:'bjPay', kind:'sel', label:'Blackjack pays', hint:'6:5 costs about 1.4% — worth seeing what it does to your line',
+    opts:[[1.5,'3 to 2'],[1.2,'6 to 5']] },
+  { key:'pen', kind:'rng', label:'Penetration', hint:'Share of the two decks dealt before the shuffle', min:0.4, max:0.85, step:0.05 }
+];
+const TRAIN_DEFS = [
+  { key:'mask', kind:'sw', label:'Hide the count', hint:'You hold it; the trainer checks it' },
+  { key:'deviations', kind:'sw', label:'Grade index plays', hint:'Off means basic strategy only' },
+  { key:'gradeBets', kind:'sw', label:'Grade bet sizing', hint:'Against a 1–8 spread' },
+  { key:'checkEvery', kind:'sel', label:'Count check every', hint:'',
+    opts:[[0,'Never'],[4,'4 hands'],[8,'8 hands'],[15,'15 hands']] }
+];
+function buildSettings(){
+  const mk = (defs, store, boxId) => {
+    document.getElementById(boxId).innerHTML = defs.map(d => {
+      const v = store[d.key];
+      let ctl = '';
+      if (d.kind === 'sw')
+        ctl = `<button class="sw" role="switch" aria-checked="${!!v}" data-key="${d.key}" data-store="${boxId}"></button>`;
+      if (d.kind === 'sel')
+        ctl = `<select data-key="${d.key}" data-store="${boxId}">` +
+          d.opts.map(o => `<option value="${o[0]}"${o[0] == v ? ' selected' : ''}>${o[1]}</option>`).join('') + '</select>';
+      if (d.kind === 'rng')
+        ctl = `<div><input type="range" data-key="${d.key}" data-store="${boxId}" min="${d.min}" max="${d.max}" step="${d.step}" value="${v}">` +
+          `<span class="mono" id="out-${d.key}" style="margin-left:8px">${Math.round(v * 100)}%</span></div>`;
+      return `<div class="row"><label>${d.label}${d.hint ? `<span class="hint">${d.hint}</span>` : ''}</label>${ctl}</div>`;
+    }).join('');
+  };
+  mk(RULE_DEFS, S.rules, 'rules-box');
+  mk(TRAIN_DEFS, S.train, 'train-box');
+  document.getElementById('ramp-table').innerHTML =
+    [['TC below +2','1 unit'],['+2','2 units'],['+3','4 units'],['+4','6 units'],['+5 and up','8 units']]
+      .map(r => `<div><span style="color:var(--txt)">${r[0]}</span> &nbsp;→&nbsp; <span style="color:var(--cut)">${r[1]}</span></div>`).join('');
+}
+function storeFor(id){ return id === 'rules-box' ? S.rules : S.train; }
+function toggleSetting(sw){
+  const store = storeFor(sw.dataset.store);
+  const next = sw.getAttribute('aria-checked') !== 'true';
+  sw.setAttribute('aria-checked', String(next));
+  store[sw.dataset.key] = next;
+  afterSettingChange(sw.dataset.key);
+}
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (!el.dataset || !el.dataset.store) return;
+  const store = storeFor(el.dataset.store);
+  store[el.dataset.key] = parseFloat(el.value);
+  if (el.type === 'range'){
+    const out = document.getElementById('out-' + el.dataset.key);
+    if (out) out.textContent = Math.round(el.value * 100) + '%';
+  }
+  afterSettingChange(el.dataset.key);
+});
+document.addEventListener('input', e => {
+  if (e.target.type === 'range' && e.target.dataset.key === 'pen'){
+    document.getElementById('out-pen').textContent = Math.round(e.target.value * 100) + '%';
+  }
+});
+function afterSettingChange(key){
+  if (S.casino){                       // hand-edited rules are no longer that casino
+    S.casino = null; S.unit = 0;
+    document.getElementById('casino-pick').value = '-1';
+    renderCasinoCard();
+  }
+  if (key === 'pen') S.cut = Math.floor(S.shoe.length * S.rules.pen);
+  renderRail(); renderStrip();
+}
+
+/* --------------------------------------------------------- count drill */
+let drillTimer = null, drillDeck = [], drillIdx = 0, drillRC = 0, drillPairs = false;
+document.getElementById('drill-speed').addEventListener('input', e => {
+  document.getElementById('drill-speed-v').textContent = (+e.target.value).toFixed(1) + 's';
+});
+document.getElementById('drill-pairs').addEventListener('click', function(){
+  drillPairs = this.getAttribute('aria-checked') !== 'true';
+  this.setAttribute('aria-checked', String(drillPairs));
+});
+document.getElementById('drill-start').addEventListener('click', startDrill);
+document.getElementById('drill-stop').addEventListener('click', stopDrill);
+
+function startDrill(){
+  stopDrill();
+  const n = Math.min(104, Math.max(5, +document.getElementById('drill-count').value || 26));
+  const deck = [];
+  for (let d = 0; d < 2; d++) for (const su of SUITS) for (const r of RANKS) deck.push({ r, s:su });
+  for (let i = deck.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  drillDeck = deck.slice(0, n); drillIdx = 0; drillRC = 0;
+  const ms = (+document.getElementById('drill-speed').value) * 1000;
+  const stage = document.getElementById('drill-stage');
+  const step = () => {
+    if (drillIdx >= drillDeck.length){ stopDrill(); askDrillCount(); return; }
+    const batch = drillPairs ? 2 : 1;
+    const shown = [];
+    for (let i = 0; i < batch && drillIdx < drillDeck.length; i++){
+      const c = drillDeck[drillIdx++]; drillRC += hiLo(c.r); shown.push(c);
+    }
+    stage.innerHTML = shown.map(c => cardEl(c)).join('');
+  };
+  step();
+  drillTimer = setInterval(step, ms);
+}
+function stopDrill(){ if (drillTimer){ clearInterval(drillTimer); drillTimer = null; } }
+function askDrillCount(){
+  document.getElementById('m-title').textContent = 'Drill result';
+  document.getElementById('m-body').textContent = `${drillDeck.length} cards went by. Running count?`;
+  const inp = document.getElementById('m-input'); inp.value = '';
+  document.getElementById('scrim').classList.add('on');
+  pendingShuffle = false;
+  document.getElementById('m-ok').onclick = () => {
+    const g = parseInt(inp.value, 10);
+    if (Number.isNaN(g)) return;
+    S.stats.cTot++; if (g === drillRC) S.stats.cOK++;
+    else logMistake(`Drill — said ${fmtIdx(g)}, actual ${fmtIdx(drillRC)}`);
+    document.getElementById('scrim').classList.remove('on');
+    document.getElementById('drill-stage').innerHTML =
+      `<div style="text-align:center"><div class="mono" style="font-size:34px;color:${g === drillRC ? 'var(--ok)' : 'var(--bad)'}">${fmtIdx(drillRC)}</div>
+       <div class="lbl mono" style="font-size:11px;letter-spacing:.14em;color:var(--mut);margin-top:6px">
+       ${g === drillRC ? 'MATCHED' : 'YOU SAID ' + fmtIdx(g)}</div></div>`;
+    document.getElementById('m-ok').onclick = null;
+    renderStrip();
+  };
+  setTimeout(() => inp.focus(), 40);
+}
+
+/* ----------------------------------------------------------------- boot */
+buildShoe();
+buildSettings();
+buildCasinoPicker();
+render();
+buildCharts();
+</script>
+</body>
+</html>
