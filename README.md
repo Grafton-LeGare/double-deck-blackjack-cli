@@ -2,4 +2,4 @@
 
 A counting and strategy training game for double deck Blackjack.
 
-Copyright © 2026. All rights reserved. Not licensed for redistribution.
+_Copyright © 2026. All rights reserved. Not licensed for redistribution._
