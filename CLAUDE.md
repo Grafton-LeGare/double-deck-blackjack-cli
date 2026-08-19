@@ -1,0 +1,1 @@
+[BUILD-PLAN.md](./BUILD-PLAN.md), and when working on story mode features, [STORY-MODE.md](./STORY-MODE.md) are the main source of truth in this project. Refer to them as needed for context and making decisions.

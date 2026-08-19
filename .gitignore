@@ -163,4 +163,5 @@ notes/
 
 # --- VSCode ---
 .vscode/*
+!.vscode/settings.json
 !.vscode/extensions.json
