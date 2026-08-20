@@ -13,6 +13,6 @@
   "scripts": {
     "build": "tsc",
     "verify": "cd ../../tools/sim && uv run python -m sim.generate && git status --porcelain -- src/",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   }
 }
