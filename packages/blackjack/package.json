@@ -9,6 +9,12 @@
       "import": "./dist/index.js"
     }
   },
-  "dependencies": {},
-  "scripts": { "build": "tsc", "test": "vitest run" }
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
 }
