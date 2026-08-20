@@ -17,6 +17,7 @@ jobs:
                 cache: pnpm
             - run: pnpm install --frozen-lockfile
             - run: pnpm -r test
+            - run: pnpm -r typecheck
     
     python:
         runs-on: ubuntu-latest
