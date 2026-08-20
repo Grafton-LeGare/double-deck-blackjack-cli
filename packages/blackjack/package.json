@@ -10,8 +10,8 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc",
     "test": "vitest run"
   },
   "devDependencies": {
