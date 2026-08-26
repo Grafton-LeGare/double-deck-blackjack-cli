@@ -1,6 +1,6 @@
 {
     "python.analysis.typeCheckingMode": "basic",
-    "python.defaultInterpreterPath": "tools/sim/.venv/bin/python",
+    "python.defaultInterpreterPath": "${workspaceFolder}/tools/sim/.venv/bin/python",
     "python.testing.pytestEnabled": true,
     "python.testing.pytestArgs": ["tools/sim"]
 }

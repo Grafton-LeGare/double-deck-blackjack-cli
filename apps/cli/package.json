@@ -1,0 +1,18 @@
+{
+    "name": "@doubledeck/cli",
+    "type": "module",
+    "private": true,
+    "bin": {
+        "trainer": "./src/blackjack.ts"
+    },
+    "scripts": {
+        "dev": "node src/blackjack.ts",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@doubledeck/blackjack": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^24.13.3"
+    }
+}
