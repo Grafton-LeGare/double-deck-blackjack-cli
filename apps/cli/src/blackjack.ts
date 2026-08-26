@@ -23,18 +23,16 @@ const defaultGameRules: RuleSet = {
 };
 let gameRules: RuleSet = defaultGameRules;
 
-// Shoe
-const combinedDeck: Card[] = PLAYING_CARDS.flatMap((card) => Array.from({ length: gameRules.decks }, () => card));
-let shuffledDeck: Card[] = shuffleDeck(combinedDeck);
+// Build initial shoe
+const combinedDeck: Card[] = combineDecks(gameRules.decks);
+let shuffledDeck: Card[] = shuffleDecks(combinedDeck);
 
 let shoe: Shoe = {
     decks: gameRules.decks,
-    cutCardPosition: gameRules.penetration * (shuffledDeck.length - 1),
+    cutCardPosition: Math.floor(gameRules.penetration * (shuffledDeck.length - 1)),
     cardsDealt: 0,
     cardsRemaining: shuffledDeck
 };
-
-/* Assignment for later: shoe = {...shoe, cardsDealt: shoe.cardsDealt + 1}; */
 
 // Initialize Game/State
 let gameState: GameState = {
@@ -44,7 +42,6 @@ let gameState: GameState = {
     bank: 10000
 };
 
-// Player wager
 async function main() {
     await displayGreeting();
 
@@ -75,9 +72,9 @@ async function main() {
             const PER_ROW = 13;
 
             // Print the shoe with i rows and j columns
-            for (let i = 0; i < Math.floor(shoe.cardsRemaining.length / PER_ROW); i++) {              
+            for (let i = 0; i < Math.floor(shoeSize(gameState.shoe) / PER_ROW); i++) {              
                 for (let j = 0; j < PER_ROW; j++) {
-                    const nextCard: Card | undefined = shoe.cardsRemaining[i * PER_ROW + j];
+                    const nextCard: Card | undefined = gameState.shoe.cardsRemaining[i * PER_ROW + j];
                     if (nextCard != undefined) {
                         msg += `${nextCard.rank}${suitSymbol(nextCard.suit)} `;
                     }
@@ -87,8 +84,8 @@ async function main() {
             }
 
             // Print last row
-            for (let i = shoe.cardsRemaining.length - (shoe.cardsRemaining.length % PER_ROW); i < shoe.cardsRemaining.length; i++) {
-                const nextCard: Card | undefined = shoe.cardsRemaining[i];
+            for (let i = shoeSize(gameState.shoe) - (shoeSize(gameState.shoe) % PER_ROW); i < shoeSize(gameState.shoe); i++) {
+                const nextCard: Card | undefined = gameState.shoe.cardsRemaining[i];
                 if (nextCard != undefined) {
                     msg += `${nextCard.rank}${suitSymbol(nextCard.suit)} `; 
                 }
@@ -98,7 +95,8 @@ async function main() {
             }
             else {
                 output.write("\n");
-            }    
+            }
+            await sleep(1);    
         }
         else if (userResponse.toUpperCase() == 'R') {
             // Animated shuffling waiter
@@ -109,7 +107,7 @@ async function main() {
                 await sleep(2/6);
             }
             output.write("\n\n");
-            shoe = {...shoe, cardsRemaining: shuffleDeck(shoe.cardsRemaining)};
+            gameState = {...gameState, shoe: {...gameState.shoe, cardsRemaining: shuffleDecks(gameState.shoe.cardsRemaining)}};
         }
         else if (userResponse.toUpperCase() != 'Q') {
             printSpaced("Invalid response");
@@ -125,6 +123,10 @@ async function main() {
 
 main();
 
+// TO-DO 
+
+// Player wager
+
 // Deal cards
 
 // Present actions
@@ -132,7 +134,13 @@ main();
 // Resolve action chosen
 
 // Utility functions
-function shuffleDeck(deck: readonly Card[]): Card[] {
+
+// Shoe
+function combineDecks(numDecks: number): Card[] {
+    return PLAYING_CARDS.flatMap((card) => Array.from({ length: numDecks }, () => card));
+}
+
+function shuffleDecks(deck: readonly Card[]): Card[] {
     const shuffled: Card[] = [...deck];
     const n = shuffled.length;
     for (let i = n - 1; i > 0; i--) {
@@ -140,6 +148,138 @@ function shuffleDeck(deck: readonly Card[]): Card[] {
         [shuffled[strike], shuffled[i]] = [shuffled[i]!, shuffled[strike]!];
     }
     return shuffled;
+}
+
+function getCutCardPosition(rules: RuleSet): number {
+    const defaultPen = rules.penetration;
+    const jitter = jitterFromPenMode(rules.penMode);
+    let adjustedPen: number;
+    if (rules.penMode == 'notch') {
+        adjustedPen = defaultPen;
+    }
+    else {
+        // Minimum 0.4, maximum 0.88, variance -jitter : +jitter
+        adjustedPen = Math.max(0.40, Math.min(0.88, defaultPen + (Math.random() * 2 - 1) * jitter));      
+    }
+    return Math.floor(adjustedPen * (rules.decks * 52 - 1)); 
+}
+
+function refreshShoe(state: GameState): GameState {
+    const combinedDeck: Card[] = combineDecks(state.rules.decks);
+    const shuffledDeck: Card[] = shuffleDecks(combinedDeck);
+    const freshShoe: Shoe = {
+        decks: state.rules.decks,
+        cutCardPosition: getCutCardPosition(state.rules),
+        cardsDealt: 0,
+        cardsRemaining: shuffledDeck
+    };
+    return {...state, shoe: freshShoe};
+}
+
+function shoeSize(shoe: Shoe): number {
+    return shoe.decks * 52;
+}
+
+function decksRemaining(shoe: Shoe): number {
+    return Math.max(0.25, (shoeSize(shoe) - shoe.cardsDealt) / shoeSize(shoe));
+}
+
+function jitterFromPenMode(mode: string): number {
+    return mode === 'notch' ? 0 : mode === 'cutcard' ? 0.025 : 0.075;
+}
+
+// Cards
+function suitSymbol(suit: Suit) {
+    return SUIT_SYMBOLS[SUITS.indexOf(suit)];
+}
+
+function cardValue(card: Card): number {
+    return card.rank === 'A' ? 11 : ['T', 'J', 'Q', 'K'].includes(card.rank) ? 10 : +card.rank;
+}
+
+function cardsFromHand(hand: Hand | DealerHand): readonly Card[] {
+    return 'cards' in hand ? hand.cards : [hand.upcard, hand.hole, ...hand.drawn];
+}
+
+function handTotal(hand: Hand | DealerHand): number {
+    const cards: readonly Card[] = cardsFromHand(hand);
+
+    let total = 0, numAces = 0;
+    for (const card of cards) {
+        total += cardValue(card);
+        if (card.rank === 'A') numAces++;
+    }
+    while (total > 21 && numAces > 0) {
+        total -= 10;
+        numAces--;
+    }
+
+    return total;
+}
+
+function twoCardHand(hand: Hand): boolean {
+    return hand.cards.length === 2;
+}
+
+function hardOrSoft(hand: Hand | DealerHand): 'hard' | 'soft' {
+    const cards: readonly Card[] = cardsFromHand(hand);
+
+    // Total with every ace counted as 1; the hand is soft if one can be 11 instead
+    const minTotal = cards.reduce((total, card) => total + (card.rank === 'A' ? 1 : cardValue(card)), 0);
+    return cards.some((card) => card.rank === 'A') && minTotal + 10 <= 21 ? 'soft' : 'hard';
+}
+
+function canSplit(hand: Hand, rules: RuleSet, state: GameState): boolean {
+    if (!twoCardHand(hand)) return false;
+    const [firstCard, secondCard] = hand.cards;
+    if (firstCard && secondCard && cardValue(firstCard) === cardValue(secondCard)) {
+        if (state.hands && state.hands.length < rules.maxHands && (firstCard.rank != 'A' || rules.rsa)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
+    const total = handTotal(hand);
+    let legalActions: Action[] = ['S'];
+    const splitAceHand = hand.fromSplit && hand.cards.some((card) => card.rank === 'A');
+    if (total < 21 && !splitAceHand) legalActions.push('H');
+    if (twoCardHand(hand) && !splitAceHand && (!hand.fromSplit || rules.das)) legalActions.push('D');
+    if (canSplit(hand, rules, state)) legalActions.push('P');
+    if (twoCardHand(hand) && !hand.fromSplit && rules.surrender) legalActions.push('R');
+    return legalActions;
+}
+
+function isBlackjack(hand: Hand | DealerHand): boolean {
+    const cards: readonly Card[] = cardsFromHand(hand);
+    if ('bet' in hand) {
+        const hasAce = hand.cards.some((card) => card.rank === 'A');
+        return !hand.fromSplit && twoCardHand(hand) && hasAce && handTotal(hand) == 21;
+    }
+    else {
+        return hand.drawn.length == 0 && handTotal(hand) == 21 && (hand.upcard.rank === 'A' || hand.hole.rank === 'A');
+    }
+}
+
+// Dealer
+
+// Strategy
+function between(num: number, low: number, high: number): boolean {
+    return num >= low && num <= high;
+}
+
+function situationKey(playerHand: Hand, upcard: Card): string {
+    const [firstCard, secondCard] = playerHand.cards;
+    if (playerHand.cards.length === 2 && firstCard && secondCard && firstCard.rank === secondCard.rank) {
+        return `pair${cardValue(firstCard)}v${cardValue(upcard)}`;
+    }
+    return `${hardOrSoft(playerHand)}${handTotal(playerHand)}v${cardValue(upcard)}`;
+}
+
+// Output
+function printSpaced(msg: string) {
+    console.log(`${msg}\n`);
 }
 
 function sleep(duration: number): Promise<void> {
@@ -207,12 +347,4 @@ async function displayGreeting(): Promise<void> {
     // Spacing buffer
     output.write("\n\n");
     await sleep(0.5);
-}
-
-function suitSymbol(suit: Suit) {
-    return SUIT_SYMBOLS[SUITS.indexOf(suit)];
-}
-
-function printSpaced(msg: string) {
-    console.log(`${msg}\n`);
 }
