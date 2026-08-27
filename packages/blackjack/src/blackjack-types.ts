@@ -69,8 +69,8 @@ export type Casino = {
 };
 
 export type DealerHand = {
-    readonly upcard: Card;
-    readonly hole: Card;
+    readonly upcard?: Card;
+    readonly hole?: Card;
     readonly drawn: readonly Card[];
     readonly holeRevealed: boolean;
 };
