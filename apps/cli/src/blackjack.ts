@@ -1,13 +1,16 @@
-import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/blackjack/src/blackjack-types.ts';
 import type {
     Rank, Suit, Card,
     Shoe, RuleSet, Casino, DealerHand,
-    RunningCount, Hand, Action,
+    RunningCount, Hand, Action, PlayerAction,
     GameState
 } from '../../../packages/blackjack/src/blackjack-types.ts';
-import type * as bjTypes from '../../../packages/blackjack/src/blackjack-types.ts';
+import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/blackjack/src/blackjack-types.ts';
+
+import type { Animation } from './blackjack-animations.ts';
+import { GREETING_ANIMATION, RESHUFFLE_ANIMATION, dealAnimation } from './blackjack-animations.ts';
+
 import * as readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
+import process, { stdin as input, stdout as output } from 'node:process';
 
 // DA RULES
 const defaultGameRules: RuleSet = {
@@ -45,7 +48,9 @@ let gameState: GameState = {
 };
 
 async function main() {
-    await displayGreeting();
+    output.write('\n');
+    await displayAnimation(GREETING_ANIMATION);
+    await sleep(0.5);
 
     let userResponse: string = '';
     do {
@@ -55,11 +60,7 @@ async function main() {
         printSpaced("Would you like to play a new hand? (P - Play | Q - Quit | D - Display shoe | R - Reshuffle)");
         await sleep(0.5);
 
-        let reader: readline.Interface = readline.createInterface(input, output);
-        userResponse = await reader.question("> ");
-        reader.close();
-        await sleep(0.5);
-        output.write("\n");
+        userResponse = await arrowedPrompt();
 
         if (userResponse.toUpperCase() == 'P') {
             // Take the player's bet
@@ -71,41 +72,26 @@ async function main() {
             do {
                 printSpaced("How much do you bet? ([X] - X dollars)");
                 await sleep(0.5);
-                reader = readline.createInterface(input, output);
-                bet = Number(await reader.question("> ")); 
-                reader.close();
-                await sleep(0.5);
-                output.write("\n");
+                bet = Number(await arrowedPrompt());
                 if (Number.isNaN(bet)) {
                     printSpaced("Invalid response");
                     await sleep(1);
                     printSpaced("Please enter a valid amount (1, 2, 3, etc.)");
                     await sleep(2);
                 }
-            } while (Number.isNaN(bet));
-
-            // Finish Game/State setup
-            gameState = {
-                ...gameState,
-                hands: [{
-                    cards: [],
-                    bet: bet,
-                    fromSplit: false,
-                    result: ''
-                }],
-                dealerHand: {
-                    drawn: [],
-                    holeRevealed: false
-                },
-                activeHand: 0,
-                insurance: 0
-            };
+                else if (bet <= 0 || bet >= gameState.bank) {
+                    printSpaced("Invalid bet");
+                    await sleep(1);
+                    printSpaced(`Please limit your bet to ($1 - $${gameState.bank})`);
+                    await sleep(2);
+                }
+            } while (Number.isNaN(bet) || bet <= 0 || bet >= gameState.bank);
 
             // CORE GAME LOOP: reduce -> render -> reduce
-            let userInput: string = 'bet';
-            while (userInput != 'dismiss') {
-                gameState = reduce(gameState, userInput);
-                userInput = await render(gameState);
+            let userAction: PlayerAction | undefined = {type: 'bet', amount: bet};
+            while (userAction) {
+                gameState = reduce(gameState, userAction);
+                userAction = await render(gameState);
             }    
             gameState = {...gameState, gamePhase: 'bet'};
         }
@@ -124,14 +110,10 @@ async function main() {
 
         else if (userResponse.toUpperCase() == 'R') {
             // Refresh the shoe with animated shuffling waiter
-            const frames = ['Reshuffling the shoe.', 'Reshuffling the shoe..', 'Reshuffling the shoe...'];
-            for (let i = 0; i < 6; i++) {
-                output.write("\r\x1b[2K");
-                output.write("" + frames[i % frames.length]);
-                await sleep(2/6);
-            }
-            output.write("\n\n");
+            output.write('\r');
+            await displayAnimation(RESHUFFLE_ANIMATION);
             gameState = refreshShoe(gameState);
+            await sleep(1/3);
         }
 
         else {
@@ -144,35 +126,112 @@ async function main() {
     } while (userResponse.toUpperCase() != 'Q');
 }
 
+// This application can permanently hide the cursor - this makes sure you always get it back.
+process.on('exit', () => output.write("\x1b[?25h"));
+process.on('SIGINT', () => process.exit(130));
+
 main();
 
-function reduce(state: GameState, input: string): GameState {
+function reduce(state: GameState, action: PlayerAction): GameState {
     // ONLY CALL THIS FUNCTION WHEN THE PLAYER HITS ENTER
-    if (input == 'bet') {
-        // The player has bet -> deal out cards and offer insurance on dealer Ace
-        state = hit(hit(hit(hit(state, 'player'), 'dealer'), 'player'), 'dealer');
-        if (state.dealerHand?.upcard?.rank === 'A') {
-            // Transition to insurance offer
-            return {...state, gamePhase: 'insurance'};
-        }
+    switch (action.type) {
+        case 'bet': {
+            // Finish Game/State setup with amount wagered
+            state = {
+                ...state, 
+                bank: state.bank - action.amount,
+                hands: [{
+                    cards: [],
+                    bet: action.amount,
+                    fromSplit: false,
+                    result: ''
+                }],
+                dealerHand: {
+                    drawn: [],
+                    holeRevealed: false
+                },
+                activeHand: 0,
+                insurance: 0
+            };
 
-        // Check for blackjack
-        const startingHand: Hand | undefined = state.hands?.[state.activeHand ?? 0];
-        if (state.dealerHand && startingHand && (isBlackjack(state.dealerHand) || isBlackjack(startingHand))) {
-            return settleHands(state);
-        }
+            // The player has bet -> deal out cards and offer insurance on dealer Ace
+            state = hit(hit(hit(hit(state, 'player'), 'dealer'), 'player'), 'dealer');
+            if (state.dealerHand?.upcard?.rank === 'A') {
+                // Transition to insurance offer
+                return {...state, gamePhase: 'insurance'};
+            }
 
-        // Transition to gameplay
-        return {...state, gamePhase: 'play'};
+            // Check for blackjack
+            const startingHand: Hand | undefined = state.hands?.[state.activeHand ?? 0];
+            if (state.dealerHand && startingHand && (isBlackjack(state.dealerHand) || isBlackjack(startingHand))) {
+                return settleHands(state);
+            }
+
+            // Transition to gameplay
+            return {...state, gamePhase: 'play'};
+        }
+        case 'insuranceTaken': {
+            return {...state, gamePhase: 'bet'};
+        }  
+        case 'insuranceDeclined': {
+            return {...state, gamePhase: 'bet'};
+        }  
     }
-
 
     // Remove later
     return state;
 }
 
-async function render(state: GameState): Promise<string> {
-    return 'dismiss';
+async function render(state: GameState): Promise<PlayerAction | undefined> {
+    const PHASE = state.gamePhase;
+
+    if (PHASE == 'insurance' ||
+        PHASE == 'play' && state.activeHand == 0 && state.hands?.[0]?.cards.length == 2 && !state.dealerHand?.holeRevealed) {
+            // Always display the deal animation at hand start
+            const [firstCard, secondCard] = state.hands?.[0]?.cards ?? [];
+            const upCard = state.dealerHand?.upcard;
+            if (firstCard && secondCard && upCard) {
+                await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+                await sleep(0.5);
+
+                // Offer insurance and take insurance bet
+                if (PHASE == 'insurance') {
+                    printSpaced("Dealer is showing an A: would you like to buy insurance? (Y - Yes | N - No)");
+                    await sleep(1.5);
+                    const response = await arrowedPrompt();
+                    if (!['y', 'yes', 'ye', 'yeah'].includes(response.toLowerCase())) {
+                        printSpaced("Best of luck...");
+                        await sleep(1.5);
+
+                        return { type: 'insuranceDeclined' };
+                    }
+                    else {
+                        const max = maxInsurance(state.hands?.[0]?.bet);
+                        let insuranceBet: number;
+                        do {
+                            printSpaced(`Enter your insurance bet ($1 - $${max})`);
+                            insuranceBet = Number(await arrowedPrompt());
+                            if (Number.isNaN(insuranceBet) || insuranceBet == 0) {
+                                printSpaced("Don't be rude: you already agreed to insurance");
+                                await sleep(1);
+                                printSpaced("Please enter a valid amount (1, 2, 3, etc.)");
+                                await sleep(2);
+                            }
+                            else if (insuranceBet < 0 || insuranceBet > max) {
+                                printSpaced("Invalid insurance bet");
+                                await sleep(1);
+                                printSpaced(`Please limit your bet to ($1 - $${max})`);
+                                await sleep(2);
+                            }
+                        } while (Number.isNaN(insuranceBet) || insuranceBet <= 0 || insuranceBet > max);
+
+                        return { type: 'insuranceTaken', amount: insuranceBet};
+                    }
+                }
+            }
+    }
+
+    return undefined;
 }
 
 function hit(state: GameState, to: 'player' | 'dealer'): GameState {
@@ -227,7 +286,7 @@ function settleHands(state: GameState): GameState {
 
 /*  ----- Utility functions ----- */
 
-// Shoe
+// #region Shoe
 function combineDecks(numDecks: number): Card[] {
     return PLAYING_CARDS.flatMap((card) => Array.from({ length: numDecks }, () => card));
 }
@@ -279,10 +338,11 @@ function decksRemaining(shoe: Shoe): number {
 function jitterFromPenMode(mode: string): number {
     return mode === 'notch' ? 0 : mode === 'cutcard' ? 0.025 : 0.075;
 }
+// #endregion
 
-// Cards
+// #region Cards
 function suitSymbol(suit: Suit) {
-    return SUIT_SYMBOLS[SUITS.indexOf(suit)];
+    return SUIT_SYMBOLS[suit];
 }
 
 function cardValue(card: Card): number {
@@ -355,10 +415,21 @@ function isBlackjack(hand: Hand | DealerHand): boolean {
         return hand.drawn.length == 0 && handTotal(hand) == 21 && (hand.upcard?.rank === 'A' || hand.hole?.rank === 'A');
     }
 }
+// #endregion
 
 // Dealer
 
-// Strategy
+// #region Accounting
+function totalWagered(hands: Hand[] | undefined): number {
+    return hands?.reduce((total, hand) => total + hand.bet, 0) ?? 0;
+}
+
+function maxInsurance(bet: number | undefined): number {
+    return bet ? bet / 2 : 0;
+}
+// #endregion
+
+// #region Strategy
 function between(num: number, low: number, high: number): boolean {
     return num >= low && num <= high;
 }
@@ -370,14 +441,34 @@ function situationKey(playerHand: Hand, upcard: Card): string {
     }
     return `${hardOrSoft(playerHand)}${handTotal(playerHand)}v${cardValue(upcard)}`;
 }
+// #endregion
 
-// Output
+// #region Input/Output
 function printSpaced(msg: string) {
     console.log(`${msg}\n`);
 }
 
 function sleep(duration: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, duration * 1000));
+}
+
+async function arrowedPrompt(): Promise<string> {
+    const reader: readline.Interface = readline.createInterface(input, output);
+    const response: string = await reader.question("> ");
+    reader.close();
+    await sleep(0.5);
+    output.write('\n');
+    return response;
+}
+
+function parseAction(input: string): Action | undefined {
+    input = input.toLowerCase();
+    if (['h', 'hi', 'hit', 'hits'].includes(input)) return 'H';
+    if (['s', 'st', 'stan', 'stand', 'stands'].includes(input)) return 'S';
+    if (['d', 'do', 'doub', 'double', 'doubles'].includes(input)) return 'D';
+    if (['p', 'sp', 'spl', 'split', 'splits'].includes(input)) return 'P';
+    if (['r', 'su', 'sur', 'surren', 'surrender', 'surrenders'].includes(input)) return 'R';
+    return undefined;
 }
 
 function formatShoe(shoe: Shoe, perRow: number): string {
@@ -412,65 +503,28 @@ function formatShoe(shoe: Shoe, perRow: number): string {
     return formattedShoe;
 }
 
-async function displayGreeting(): Promise<void> {
-    // Spacing buffer
-    output.write("\n");
+async function displayAnimation(animation: Animation): Promise<void> {
+    const FRAME_COUNT = animation.frames.length;
+    const TIME_PER_FRAME = animation.timePerFrame;
+    const DURATION = animation.duration; 
 
-    const frames: string[] = [
-        `\\ ******************************* \\
-
-     Welcome to CLI Blackjack!
-            
-\\ ******************************* \\`,
-`| ******************************* |
-
-     Welcome to CLI Blackjack!
-            
-| ******************************* |`,
-`/ ******************************* /
-
-     Welcome to CLI Blackjack!
-            
-/ ******************************* /`,
-`- ******************************* -
-
-     Welcome to CLI Blackjack!
-            
-- ******************************* -`,
-`\\ ******************************* \\
-
-     Welcome to CLI Blackjack!
-            
-\\ ******************************* \\`,
-`| ******************************* |
-
-     Welcome to CLI Blackjack!
-            
-| ******************************* |`,
-`/ ******************************* /
-
-     Welcome to CLI Blackjack!
-            
-/ ******************************* /`,
-`- ******************************* -
-
-     Welcome to CLI Blackjack!
-            
-- ******************************* -`
-    ];
-    const FRAME_COUNT = frames.length;
-    const TIME_PER_FRAME = (1/3) / FRAME_COUNT;
-    const DURATION = 3; 
-
-    output.write("\x1b[s");
-    for (let i = 0; i < DURATION / TIME_PER_FRAME; i++) {
-        output.write("\x1b[u");
-        output.write("\x1b[J");
-        output.write("" + frames[i % FRAME_COUNT]);
-        await sleep(TIME_PER_FRAME);
+    // Hide the cursor so it doesn't flicker between frames; always give it back
+    output.write("\x1b[?25l");
+    try {
+        output.write("\x1b[s");
+        for (let i = 0; i < DURATION / TIME_PER_FRAME; i++) {
+            const frame: string = animation.frames[i % FRAME_COUNT] ?? '';
+            output.write("\x1b[u");
+            output.write("\x1b[J");
+            output.write(frame);
+            await sleep(TIME_PER_FRAME);
+        }
+    }
+    finally {
+        output.write("\x1b[?25h");
     }
 
     // Spacing buffer
     output.write("\n\n");
-    await sleep(0.5);
 }
+// #endregion

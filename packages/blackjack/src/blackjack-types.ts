@@ -1,10 +1,16 @@
 // Cards
 export const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'] as const;
 export const SUITS = ['S', 'C', 'H', 'D'] as const;
-export const SUIT_SYMBOLS = ['\u2660','\u2665','\u2666','\u2663'];
 
 export type Rank = typeof RANKS[number];
 export type Suit = typeof SUITS[number];
+
+export const SUIT_SYMBOLS: Record<Suit, string> = {
+    S: '\u2660',
+    C: '\u2663',
+    H: '\u2665',
+    D: '\u2666'
+};
 
 export type Card = {
     readonly rank: Rank;
@@ -89,12 +95,17 @@ export type Hand = {
     readonly result: string
 };
 
-export type Action = 'Hit' | 'HIT' | 'hit' | 'H' | 'h' |
-    'Stand' | 'STAND' | 'stand' | 'S' | 's' |
-    'Double' | 'DOUBLE' | 'double' | 'D' | 'd' |
-    'Split' | 'SPLIT' | 'split' | 'P' | 'p' |
-    'Surrender' | 'SURRENDER' | 'surrender' | 'R' | 'r';
+export type Action = 'H' | 'S' | 'D' | 'P' | 'R';
 
+export type PlayerAction = 
+    | { readonly type: 'bet';               readonly amount: number}
+    | { readonly type: 'insuranceTaken';    readonly amount: number}
+    | { readonly type: 'insuranceDeclined' }
+    | { readonly type: 'hit' }
+    | { readonly type: 'stand' }
+    | { readonly type: 'double' }
+    | { readonly type: 'split' }
+    | { readonly type: 'surrender' };
 
 // STATE
 export type GameState = {
