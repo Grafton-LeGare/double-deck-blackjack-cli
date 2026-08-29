@@ -99,8 +99,7 @@ export type Action = 'H' | 'S' | 'D' | 'P' | 'R';
 
 export type PlayerAction = 
     | { readonly type: 'bet';               readonly amount: number}
-    | { readonly type: 'insuranceTaken';    readonly amount: number}
-    | { readonly type: 'insuranceDeclined' }
+    | { readonly type: 'insurance';    readonly amount: number}
     | { readonly type: 'hit' }
     | { readonly type: 'stand' }
     | { readonly type: 'double' }
@@ -112,10 +111,10 @@ export type GameState = {
     readonly rules: RuleSet;
     readonly casino?: Casino;
     readonly shoe: Shoe;
-    readonly hands?: readonly Hand[];
-    readonly dealerHand?: DealerHand;
-    readonly activeHand?: number;
+    readonly hands: readonly Hand[];
+    readonly dealerHand: DealerHand;
+    readonly activeHand: number;
     readonly gamePhase: 'bet' | 'insurance' | 'play' | 'settle';
-    readonly insurance?: number;
+    readonly insurance: number;
     readonly bank: number;
 };

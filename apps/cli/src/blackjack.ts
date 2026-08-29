@@ -7,7 +7,7 @@ import type {
 import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/blackjack/src/blackjack-types.ts';
 
 import type { Animation } from './blackjack-animations.ts';
-import { GREETING_ANIMATION, RESHUFFLE_ANIMATION, dealAnimation } from './blackjack-animations.ts';
+import { GREETING_ANIMATION, RESHUFFLE_ANIMATION, formatCard, dealAnimation } from './blackjack-animations.ts';
 
 import * as readline from 'node:readline/promises';
 import process, { stdin as input, stdout as output } from 'node:process';
@@ -43,6 +43,10 @@ const STARTING_BANKROLL = 10000;
 let gameState: GameState = {
     rules: gameRules,
     shoe: shoe,
+    hands: [],
+    dealerHand: { drawn: [], holeRevealed: false },
+    activeHand: 0,
+    insurance: 0,
     gamePhase: 'bet',
     bank: STARTING_BANKROLL
 };
@@ -88,10 +92,10 @@ async function main() {
             } while (Number.isNaN(bet) || bet <= 0 || bet >= gameState.bank);
 
             // CORE GAME LOOP: reduce -> render -> reduce
-            let userAction: PlayerAction | undefined = {type: 'bet', amount: bet};
-            while (userAction) {
-                gameState = reduce(gameState, userAction);
-                userAction = await render(gameState);
+            let playerAction: PlayerAction | undefined = {type: 'bet', amount: bet};
+            while (playerAction) {
+                gameState = reduce(gameState, playerAction);
+                playerAction = await render(gameState);
             }    
             gameState = {...gameState, gamePhase: 'bet'};
         }
@@ -136,7 +140,7 @@ function reduce(state: GameState, action: PlayerAction): GameState {
     // ONLY CALL THIS FUNCTION WHEN THE PLAYER HITS ENTER
     switch (action.type) {
         case 'bet': {
-            // Finish Game/State setup with amount wagered
+            // Finish Game/State setup with amount wagered. Also functions as a reset
             state = {
                 ...state, 
                 bank: state.bank - action.amount,
@@ -156,26 +160,58 @@ function reduce(state: GameState, action: PlayerAction): GameState {
 
             // The player has bet -> deal out cards and offer insurance on dealer Ace
             state = hit(hit(hit(hit(state, 'player'), 'dealer'), 'player'), 'dealer');
-            if (state.dealerHand?.upcard?.rank === 'A') {
+            if (state.dealerHand.upcard?.rank === 'A') {
                 // Transition to insurance offer
                 return {...state, gamePhase: 'insurance'};
             }
 
             // Check for blackjack
-            const startingHand: Hand | undefined = state.hands?.[state.activeHand ?? 0];
-            if (state.dealerHand && startingHand && (isBlackjack(state.dealerHand) || isBlackjack(startingHand))) {
+            const startingHand: Hand | undefined = state.hands[state.activeHand];
+            if (startingHand && (isBlackjack(state.dealerHand) || isBlackjack(startingHand))) {
                 return settleHands(state);
             }
 
             // Transition to gameplay
             return {...state, gamePhase: 'play'};
         }
-        case 'insuranceTaken': {
-            return {...state, gamePhase: 'bet'};
-        }  
-        case 'insuranceDeclined': {
-            return {...state, gamePhase: 'bet'};
-        }  
+        case 'insurance': {
+            // Record and deduct insurance bet
+            state = {...state, insurance: action.amount, bank: state.bank - action.amount};
+
+            // Dealer checks for blackjack
+            if (isBlackjack(state.dealerHand)) {
+                return settleHands(state);
+            }
+            else {
+                return {...state, gamePhase: 'play'};
+            }
+        }
+        case 'hit': {
+            // TO-DO: Check whether the player busted and settle accordingly
+            return hit(state, 'player');
+        }
+        case 'stand': {
+            if (state.activeHand == state.hands.length - 1) return settleHands(state);
+            return {...state, activeHand: state.activeHand + 1};
+        }
+        case 'double': {
+            const currentHand: Hand | undefined = state.hands[state.activeHand];
+            if (!currentHand) {
+                return state;
+            }
+            else {
+                state = hit(state, 'player');
+                state = {
+                    ...state,
+                    hands: state.hands.map((hand, index) => index == state.activeHand ? 
+                        { ...hand, bet: hand.bet * 2}
+                        : hand),
+                    bank: state.bank - currentHand.bet
+                }
+                if (state.activeHand == state.hands.length - 1) return settleHands(state);
+                return {...state, activeHand: state.activeHand + 1};
+            }    
+        }
     }
 
     // Remove later
@@ -185,50 +221,84 @@ function reduce(state: GameState, action: PlayerAction): GameState {
 async function render(state: GameState): Promise<PlayerAction | undefined> {
     const PHASE = state.gamePhase;
 
-    if (PHASE == 'insurance' ||
-        PHASE == 'play' && state.activeHand == 0 && state.hands?.[0]?.cards.length == 2 && !state.dealerHand?.holeRevealed) {
-            // Always display the deal animation at hand start
-            const [firstCard, secondCard] = state.hands?.[0]?.cards ?? [];
-            const upCard = state.dealerHand?.upcard;
-            if (firstCard && secondCard && upCard) {
-                await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
-                await sleep(0.5);
+    if (PHASE == 'insurance') {
+        // Always display the deal animation at hand start
+        const [firstCard, secondCard] = state.hands[0]?.cards ?? [];
+        const upCard = state.dealerHand.upcard;
+        if (firstCard && secondCard && upCard) {
+            await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+            await sleep(0.5);
 
-                // Offer insurance and take insurance bet
-                if (PHASE == 'insurance') {
-                    printSpaced("Dealer is showing an A: would you like to buy insurance? (Y - Yes | N - No)");
-                    await sleep(1.5);
-                    const response = await arrowedPrompt();
-                    if (!['y', 'yes', 'ye', 'yeah'].includes(response.toLowerCase())) {
-                        printSpaced("Best of luck...");
-                        await sleep(1.5);
+            // Offer insurance and take insurance bet
+            printSpaced("Dealer is showing an A: would you like to buy insurance? (Y - Yes | N - No)");
+            await sleep(1.5);
+            const response = await arrowedPrompt();
+            if (!['y', 'yes', 'ye', 'yeah'].includes(response.toLowerCase())) {
+                printSpaced("Best of luck...");
+                await sleep(1.5);
 
-                        return { type: 'insuranceDeclined' };
+                return { type: 'insurance', amount: 0 };
+            }
+            else {
+                const max = maxInsurance(state.hands[0]?.bet);
+                let insuranceBet: number;
+                do {
+                    printSpaced(`Enter your insurance bet ($1 - $${max})`);
+                    insuranceBet = Number(await arrowedPrompt());
+                    if (Number.isNaN(insuranceBet) || insuranceBet == 0) {
+                        printSpaced("Don't be rude: you already agreed to insurance");
+                        await sleep(1);
+                        printSpaced("Please enter a valid amount (1, 2, 3, etc.)");
+                        await sleep(2);
                     }
-                    else {
-                        const max = maxInsurance(state.hands?.[0]?.bet);
-                        let insuranceBet: number;
-                        do {
-                            printSpaced(`Enter your insurance bet ($1 - $${max})`);
-                            insuranceBet = Number(await arrowedPrompt());
-                            if (Number.isNaN(insuranceBet) || insuranceBet == 0) {
-                                printSpaced("Don't be rude: you already agreed to insurance");
-                                await sleep(1);
-                                printSpaced("Please enter a valid amount (1, 2, 3, etc.)");
-                                await sleep(2);
-                            }
-                            else if (insuranceBet < 0 || insuranceBet > max) {
-                                printSpaced("Invalid insurance bet");
-                                await sleep(1);
-                                printSpaced(`Please limit your bet to ($1 - $${max})`);
-                                await sleep(2);
-                            }
-                        } while (Number.isNaN(insuranceBet) || insuranceBet <= 0 || insuranceBet > max);
-
-                        return { type: 'insuranceTaken', amount: insuranceBet};
+                    else if (insuranceBet < 0 || insuranceBet > max) {
+                        printSpaced("Invalid insurance bet");
+                        await sleep(1);
+                        printSpaced(`Please limit your bet to ($1 - $${max})`);
+                        await sleep(2);
                     }
+                } while (Number.isNaN(insuranceBet) || insuranceBet <= 0 || insuranceBet > max);
+
+                return { type: 'insurance', amount: insuranceBet};
+            }
+        }
+    }
+    else if (PHASE == 'play') {
+        // Check if this is the beginning of play
+        if (state.activeHand == 0 && state.hands[0]?.cards.length == 2 && !state.hands[0]?.fromSplit) {
+            // Display deal animation for normal hands
+            if (state.dealerHand.upcard?.rank != 'A') {
+                const [firstCard, secondCard] = state.hands[0]?.cards ?? [];
+                const upCard = state.dealerHand.upcard;
+                if (firstCard && secondCard && upCard) {
+                    await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+                    await sleep(0.5);
                 }
             }
+            // Display insurance resolution for dealer ace
+            else {
+                printSpaced("Dealer does not have blackjack");
+                await sleep(1.25);
+                if (state.insurance > 0) {
+                    printSpaced(`Insurance bet loses (-$${state.insurance})`);
+                    await sleep(2);
+                }
+            }
+        }
+
+        // Display the gameboard and prompt for user move
+        const gameBoard = buildGameBoard(state);
+        printSpaced(gameBoard);
+        await sleep(1);
+        const legalActions: Action[] = legalMoves(state.hands[state.activeHand]!, state.rules, state);
+        const playerAction: Action = await actionPrompt(legalActions);
+        switch(playerAction) {
+            case 'H': return { type: 'hit' };
+            case 'S': return { type: 'stand' };
+            case 'D': return { type: 'double' };
+            case 'P': return { type: 'split' };
+            case 'R': return { type: 'surrender' };
+        }
     }
 
     return undefined;
@@ -241,20 +311,19 @@ function hit(state: GameState, to: 'player' | 'dealer'): GameState {
     const shoe: Shoe = {...state.shoe, cardsDealt: state.shoe.cardsDealt + 1, cardsRemaining: state.shoe.cardsRemaining.slice(1)};
 
     if (to == 'player') {
-        const activeHand: number = state.activeHand ?? 0;
-        if (!state.hands?.[activeHand]) return state;
+        if (!state.hands[state.activeHand]) return state;
 
         return {
             ...state,
             shoe: shoe,
             hands: state.hands.map((hand, index) =>
-                index == activeHand ?
+                index == state.activeHand ?
                     {...hand, cards: [...hand.cards, nextCard]}
                     : hand)
         };
     }
     else {
-        const dealerHand: DealerHand = state.dealerHand ?? {drawn: [], holeRevealed: false};
+        const dealerHand: DealerHand = state.dealerHand;
         let resultingHand: DealerHand;
         if (!dealerHand.upcard) {
             resultingHand = {...dealerHand, upcard: nextCard};
@@ -275,12 +344,10 @@ function hit(state: GameState, to: 'player' | 'dealer'): GameState {
 }
 
 function settleHands(state: GameState): GameState {
-    throw new Error('Function not implemented.');
+    throw new Error('Hands need to be settled but settleHands is not implemented yet.');
 }
 
 // TO-DO 
-
-// Present actions
 
 // Resolve action chosen
 
@@ -387,7 +454,7 @@ function canSplit(hand: Hand, rules: RuleSet, state: GameState): boolean {
     if (!twoCardHand(hand)) return false;
     const [firstCard, secondCard] = hand.cards;
     if (firstCard && secondCard && cardValue(firstCard) === cardValue(secondCard)) {
-        if (state.hands && state.hands.length < rules.maxHands && (firstCard.rank != 'A' || rules.rsa)) {
+        if (state.hands.length < rules.maxHands && (firstCard.rank != 'A' || rules.rsa)) {
             return true;
         }
     }
@@ -396,9 +463,11 @@ function canSplit(hand: Hand, rules: RuleSet, state: GameState): boolean {
 
 function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
     const total = handTotal(hand);
-    let legalActions: Action[] = ['S'];
+    let legalActions: Action[] = [];
     const splitAceHand = hand.fromSplit && hand.cards.some((card) => card.rank === 'A');
     if (total < 21 && !splitAceHand) legalActions.push('H');
+    // Standing is always legal
+    legalActions.push('S');
     if (twoCardHand(hand) && !splitAceHand && (!hand.fromSplit || rules.das)) legalActions.push('D');
     if (canSplit(hand, rules, state)) legalActions.push('P');
     if (twoCardHand(hand) && !hand.fromSplit && rules.surrender) legalActions.push('R');
@@ -420,8 +489,8 @@ function isBlackjack(hand: Hand | DealerHand): boolean {
 // Dealer
 
 // #region Accounting
-function totalWagered(hands: Hand[] | undefined): number {
-    return hands?.reduce((total, hand) => total + hand.bet, 0) ?? 0;
+function totalWagered(hands: readonly Hand[]): number {
+    return hands.reduce((total, hand) => total + hand.bet, 0);
 }
 
 function maxInsurance(bet: number | undefined): number {
@@ -459,6 +528,38 @@ async function arrowedPrompt(): Promise<string> {
     await sleep(0.5);
     output.write('\n');
     return response;
+}
+
+const INVALID_MOVE_MESSAGE = "Invalid selection! Please select a legal move";
+const INVALID_MOVE_DURATION = 2;
+
+// Re-prompts until the move is legal, wiping the rejected input and the warning in place
+async function actionPrompt(legalActions: readonly Action[]): Promise<Action> {
+    const reader: readline.Interface = readline.createInterface(input, output);
+    try {
+        while (true) {
+            const response: string = await reader.question("> ");
+            const playerAction: Action | undefined = parseAction(response);
+            if (playerAction && legalActions.includes(playerAction)) {
+                await sleep(0.5);
+                output.write('\n');
+                return playerAction;
+            }
+
+            // The cursor sits on the line under the arrow; the extra newline leaves the gap
+            output.write(`\n${INVALID_MOVE_MESSAGE}`);
+            await sleep(INVALID_MOVE_DURATION);
+
+            // Walk back up to the arrow -- a saved row goes stale the moment the screen scrolls
+            const columns: number = output.columns ?? 80;
+            const promptRows: number = Math.max(1, Math.ceil(`> ${response}`.length / columns));
+            const messageRows: number = Math.max(1, Math.ceil(INVALID_MOVE_MESSAGE.length / columns));
+            output.write(`\x1b[${promptRows + messageRows}A\x1b[G\x1b[J`);
+        }
+    }
+    finally {
+        reader.close();
+    }
 }
 
 function parseAction(input: string): Action | undefined {
@@ -526,5 +627,45 @@ async function displayAnimation(animation: Animation): Promise<void> {
 
     // Spacing buffer
     output.write("\n\n");
+}
+
+function buildGameBoard(state: GameState): string {
+    const upCard = state.dealerHand.upcard;
+    const currentHand = state.hands[state.activeHand];
+    if (!upCard || !currentHand) {
+        return '\n   ERROR DISPLAYING GAME BOARD\n';
+    }
+    else {
+        const h17 = state.rules.h17 ? 'H17' : 'S17';
+        const das = state.rules.das ? 'DAS' : 'NDAS';
+        const rsa = state.rules.rsa ? 'RSA Allowed' : 'RSA Unallowed';
+        const bjPays = state.rules.blackjackPays == 1.5 ? 'BJ Pays 3:2' : 'BJ Pays 6:5';
+        const playingHand = `Playing hand ${state.activeHand + 1}/${state.hands.length}`;
+        const handLength = cardsFromHand(currentHand).length;
+        const playerPad = ''.padEnd(6, ' ');
+        const dealerPad = ''.padEnd(6 + (handLength - 2) * 5, ' ');
+        const betPad = ''.padEnd(13 + (handTotal(currentHand) < 10 ? 1 : 0) + (cardValue(upCard) < 10 ? 1 : 0), ' ');
+        const playerCards = cardsFromHand(currentHand).map((card) => formatCard(card)).join(' ');
+        const legalActions = legalMoves(currentHand, state.rules, state);
+        const actionList = legalActions.map((action) => {
+            switch (action) {
+                case 'H': return '[H]it';
+                case 'S': return '[S]tand';
+                case 'D': return '[D]ouble';
+                case 'P': return '[P]split';
+                case 'R': return '[R]surrender';
+                default: return '';
+            }
+        }).join('  ');
+        return (
+`CLI Casino • ${h17} • ${das} • ${rsa} • ${bjPays}
+${playingHand}
+
+Dealer   ${formatCard(upCard)} [??]${dealerPad}showing ${cardValue(upCard)}
+You      ${playerCards}${playerPad}${handTotal(currentHand)}${betPad}bet $${currentHand.bet}
+
+  ${actionList}`
+        );
+    }
 }
 // #endregion

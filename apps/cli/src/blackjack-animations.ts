@@ -64,8 +64,8 @@ export const RESHUFFLE_ANIMATION: Animation = {
     duration: 2
 };
 
-function formatCard(card: Card): string {
-    return `[${card.rank}${SUIT_SYMBOLS[card.suit]}]`;
+export function formatCard(card: Card | undefined): string {
+    return card ? `[${card.rank}${SUIT_SYMBOLS[card.suit]}]` : `[??]`;
 }
 
 // Cards land one at a time: player, dealer upcard, player, dealer hole
