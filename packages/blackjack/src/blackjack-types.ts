@@ -92,8 +92,10 @@ export type Hand = {
     readonly cards: readonly Card[];
     readonly bet: number;
     readonly fromSplit: boolean;
-    readonly result: string
+    readonly result: HandResult
 };
+
+export type HandResult = 'pending' | 'win' | 'loss' | 'push' | 'surrender';
 
 export type Action = 'H' | 'S' | 'D' | 'P' | 'R';
 

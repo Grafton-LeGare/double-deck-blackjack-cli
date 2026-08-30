@@ -148,7 +148,7 @@ function reduce(state: GameState, action: PlayerAction): GameState {
                     cards: [],
                     bet: action.amount,
                     fromSplit: false,
-                    result: ''
+                    result: 'pending'
                 }],
                 dealerHand: {
                     drawn: [],
@@ -187,12 +187,26 @@ function reduce(state: GameState, action: PlayerAction): GameState {
             }
         }
         case 'hit': {
-            // TO-DO: Check whether the player busted and settle accordingly
-            return hit(state, 'player');
+            state = hit(state, 'player');
+
+            // Check whether the player busted and settle accordingly
+            const currentHand: Hand | undefined = state.hands[state.activeHand];
+            if (!currentHand) {
+                return {...state};
+            }
+            else {               
+                if(handTotal(currentHand) > 21) {
+                    if(isLastHand(state)) return settleHands(state);
+                    return activateNextHand(state);
+                }
+                else {
+                    return {...state};
+                }
+            }
         }
         case 'stand': {
-            if (state.activeHand == state.hands.length - 1) return settleHands(state);
-            return {...state, activeHand: state.activeHand + 1};
+            if (isLastHand(state)) return settleHands(state);
+            return activateNextHand(state);
         }
         case 'double': {
             const currentHand: Hand | undefined = state.hands[state.activeHand];
@@ -208,14 +222,38 @@ function reduce(state: GameState, action: PlayerAction): GameState {
                         : hand),
                     bank: state.bank - currentHand.bet
                 }
-                if (state.activeHand == state.hands.length - 1) return settleHands(state);
-                return {...state, activeHand: state.activeHand + 1};
+                if (isLastHand(state)) return settleHands(state);
+                return activateNextHand(state);
             }    
         }
-    }
+        case 'split': {
+            const currentHand: Hand | undefined = state.hands[state.activeHand];
+            if (!currentHand) {
+                return state;
+            }
+            state = split(state);
 
-    // Remove later
-    return state;
+            // Aces were split -> game may need to be settled now
+            if (currentHand.cards[0]?.rank == 'A') {
+                let nextHand = -1;
+                let index: number = 0;
+                for (const hand of state.hands) {
+                    if (hand.cards[0]?.rank == 'A' && hand.cards[1]?.rank == 'A') {
+                        nextHand = index;
+                        break;
+                    }
+                    index++;
+                }
+                return nextHand == -1 ? settleHands(state) : {...state, activeHand: nextHand};
+            }
+            else {
+                return {...state};
+            }
+        }
+        case 'surrender': {
+            return settleSurrender(state);
+        }
+    }
 }
 
 async function render(state: GameState): Promise<PlayerAction | undefined> {
@@ -290,7 +328,10 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
         const gameBoard = buildGameBoard(state);
         printSpaced(gameBoard);
         await sleep(1);
-        const legalActions: Action[] = legalMoves(state.hands[state.activeHand]!, state.rules, state);
+        let legalActions: Action[] = legalMoves(state.hands[state.activeHand]!, state.rules, state);
+        if (state.hands[state.activeHand]!.bet > state.bank) {
+            legalActions = legalActions.filter((move) => move != 'D' && move != 'P');
+        }       
         const playerAction: Action = await actionPrompt(legalActions);
         switch(playerAction) {
             case 'H': return { type: 'hit' };
@@ -299,6 +340,40 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
             case 'P': return { type: 'split' };
             case 'R': return { type: 'surrender' };
         }
+    }
+    else if (PHASE == 'settle') {
+        printSpaced('Hands Finished');
+        await sleep(1);
+        const dealerResult = handTotal(state.dealerHand) > 21 ? 'Dealer busted' : `Dealer finishes at ${handTotal(state.dealerHand)}`;
+        printSpaced(dealerResult);
+        await sleep(1);
+        output.write('RESULTS:\n');
+        await sleep(2);
+
+        const handsWon = `${state.hands.filter((hand) => hand.result == 'win').length}/${state.hands.length}`;
+        let playerNet = state.hands.reduce((net, hand) => {
+            switch (hand.result) {
+                case 'win': return net + hand.bet;
+                case 'loss': return net - hand.bet;
+                case 'push': return net;
+                case 'surrender': return net - hand.bet / 2;
+                case 'pending': throw new Error('Game phase is settle but pending hand found');
+            }
+        }, 0);
+        if (state.insurance > 0) {
+            if (isBlackjack(state.dealerHand) && state.hands.length == 1 && state.hands[0]?.result == 'loss') {
+                playerNet += state.insurance;
+            }
+            else {
+                playerNet -= state.insurance;
+            }
+        }
+        output.write(`Player wins ${handsWon} hands  |  Net $${playerNet}`);
+        await sleep(3);
+        output.write('\n\n');
+
+        // End of game loop
+        return undefined;
     }
 
     return undefined;
@@ -343,8 +418,132 @@ function hit(state: GameState, to: 'player' | 'dealer'): GameState {
     }
 }
 
+function split(state: GameState): GameState {
+    const currentHand: Hand | undefined = state.hands[state.activeHand];
+    if (!currentHand) {
+        return state;
+    }
+    const bet = currentHand.bet;
+    const [firstCard, secondCard] = state.hands?.[0]?.cards ?? [];
+    if (bet && firstCard && secondCard) {
+        state = {
+            ...state,
+            hands: state.hands.toSpliced(state.activeHand, 1, 
+                {
+                    cards: [firstCard],
+                    fromSplit: true,
+                    bet: bet,
+                    result: 'pending'
+                },
+                {
+                    cards: [secondCard],
+                    fromSplit: true,
+                    bet: bet,
+                    result: 'pending'
+                }
+            ),
+            bank: state.bank - bet
+        };
+        state = hit(state, 'player');
+
+        // Split aces are both hit -> Hit next hand as well then return activeHand to normal
+        if (currentHand.cards[0]?.rank == 'A') {
+            state = hit({...state, activeHand: state.activeHand + 1}, 'player');
+            state = {...state, activeHand: state.activeHand - 1};
+        }
+        return {...state};
+    }
+
+    // Default return on undefined
+    return {...state};
+}
+
+function activateNextHand(state: GameState): GameState {
+    // Playing right to left activeHand + 1 is always next
+    state = {...state, activeHand: state.activeHand + 1};
+    const currentHand: Hand | undefined = state.hands[state.activeHand];
+    if (!currentHand) {
+        throw new Error('Attempted to activate non-existing hand');
+    }
+    else {
+        // If hand is from a non-ace split it needs an extra card
+        return currentHand.cards.length < 2 ? hit(state, 'player') : {...state};
+    }
+}
+
 function settleHands(state: GameState): GameState {
-    throw new Error('Hands need to be settled but settleHands is not implemented yet.');
+    // Transition to settle and reveal the dealer's hole 
+    state = {...state, dealerHand: {...state.dealerHand, holeRevealed: true}, gamePhase: 'settle'};
+
+    // Dealer play - yep this is it
+    // Don't play if player fully busted
+    if (state.hands.some((hand) => handTotal(hand) <= 21)) {
+        while (handTotal(state.dealerHand) < 17) state = hit(state, 'dealer');
+        if (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17) state = hit(state, 'dealer');
+    }
+    const dealerBlackjack = isBlackjack(state.dealerHand);
+
+    // Payout insurance on dealer blackjack - can be added regardless of win/loss/insurance because default is 0
+    if (dealerBlackjack) state = {...state, bank: state.bank + state.insurance};
+    
+    // Compare each hand to dealer -> Payout chips and assign result
+    let totalPayout: number = 0;
+    const settledHands: Hand[] = state.hands.map((hand) => {
+        if (dealerBlackjack) {
+            if (!isBlackjack(hand)) {
+                return {...hand, result: 'loss'};
+            }
+            else {
+                totalPayout += hand.bet;
+                return {...hand, result: 'push'};
+            }
+        }
+        else {
+            if (handTotal(hand) > 21 ) {
+                return {...hand, result: 'loss'};
+            }
+            else if (handTotal(hand) > handTotal(state.dealerHand) || handTotal(state.dealerHand) > 21) {
+                totalPayout += hand.bet * 2;
+                return {...hand, result: 'win'};
+            }
+            else if (handTotal(hand) < handTotal(state.dealerHand)) {
+                return {...hand, result: 'loss'};
+            }
+            else {
+                totalPayout += hand.bet;
+                return {...hand, result: 'push'};
+            }
+        }
+    });
+
+    return {...state, hands: settledHands, bank: state.bank + totalPayout};
+}
+
+function settleSurrender(state: GameState): GameState {
+    const bet = state.hands[0]?.bet;
+    const currentHand: Hand | undefined = state.hands[0];
+    if (!bet || !currentHand) {     
+        throw new Error('Error returning bet to player');
+    }
+    else {
+        // Return 1/2 bet, switch phase to settle, record surrender, reveal hole card
+        return {
+            ...state, 
+            hands: [{
+                cards: currentHand.cards,
+                fromSplit: currentHand.fromSplit,
+                bet: currentHand.bet,
+                result: 'surrender'
+            }],
+            dealerHand: { ...state.dealerHand, holeRevealed: true},
+            gamePhase: 'settle', 
+            bank: state.bank + bet / 2
+        };
+    }
+}
+
+function isLastHand(state: GameState): boolean {
+    return state.activeHand == state.hands.length - 1;
 }
 
 // TO-DO 
@@ -485,8 +684,6 @@ function isBlackjack(hand: Hand | DealerHand): boolean {
     }
 }
 // #endregion
-
-// Dealer
 
 // #region Accounting
 function totalWagered(hands: readonly Hand[]): number {
