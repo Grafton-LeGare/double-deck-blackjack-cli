@@ -100,8 +100,8 @@ export type HandResult = 'pending' | 'win' | 'loss' | 'push' | 'surrender';
 export type Action = 'H' | 'S' | 'D' | 'P' | 'R';
 
 export type PlayerAction = 
-    | { readonly type: 'bet';               readonly amount: number}
-    | { readonly type: 'insurance';    readonly amount: number}
+    | { readonly type: 'bet';               readonly amount: number }
+    | { readonly type: 'insurance';    readonly amount: number }
     | { readonly type: 'hit' }
     | { readonly type: 'stand' }
     | { readonly type: 'double' }
@@ -109,6 +109,14 @@ export type PlayerAction =
     | { readonly type: 'surrender' };
 
 // STATE
+export type GameEvent = 
+    | { readonly type: 'reshuffle'; readonly cause: 'cutcard' | 'empty' }
+    | { readonly type: 'initialDeal' }
+    | { readonly type: 'playerBlackjack' }
+    | { readonly type: 'insuranceResolved' }
+    | { readonly type: 'handBusted' }
+    | { readonly type: 'dealerDraw' };
+
 export type GameState = {
     readonly rules: RuleSet;
     readonly casino?: Casino;
@@ -119,4 +127,5 @@ export type GameState = {
     readonly gamePhase: 'bet' | 'insurance' | 'play' | 'settle';
     readonly insurance: number;
     readonly bank: number;
+    readonly events: readonly GameEvent[]
 };

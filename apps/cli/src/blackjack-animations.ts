@@ -93,3 +93,16 @@ export function dealAnimation(firstCard: Card, secondCard: Card, upcard: Card): 
     // Play through exactly once -- displayAnimation wraps around past the last frame
     return {frames: frames, timePerFrame: timePerFrame, duration: frames.length * timePerFrame};
 }
+
+const playerBlackjackFrames: readonly string[] = [
+     '    · Player blackjack! ·',
+     '    • Player blackjack! •',
+     '    * Player blackjack! *',
+     '    • Player blackjack! •'
+];
+
+export const playerBlackjackAnimation: Animation = {
+     frames: playerBlackjackFrames,
+     timePerFrame: 0.25,
+     duration: 3
+};
