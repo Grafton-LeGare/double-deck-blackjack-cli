@@ -2,7 +2,7 @@ import type {
     Rank, Suit, Card,
     Shoe, RuleSet, Casino, DealerHand,
     RunningCount, Hand, Action, PlayerAction,
-    GameState
+    GameState, GameEvent, Step
 } from '../../../packages/blackjack/src/blackjack-types.ts';
 import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/blackjack/src/blackjack-types.ts';
 
@@ -45,12 +45,11 @@ let gameState: GameState = {
     rules: gameRules,
     shoe: shoe,
     hands: [],
-    dealerHand: { drawn: [], holeRevealed: false },
+    dealerHand: { drawn: [], holeRevealed: false, playedOut: false },
     activeHand: 0,
     insurance: 0,
     gamePhase: 'bet',
-    bank: STARTING_BANKROLL,
-    events: []
+    bank: STARTING_BANKROLL
 };
 
 async function main() {
@@ -97,16 +96,10 @@ async function main() {
             // CORE GAME LOOP: reduce -> render -> reduce
             let playerAction: PlayerAction | undefined = {type: 'bet', amount: bet};
             while (playerAction) {
-                gameState = reduce(gameState, playerAction);
-                playerAction = await render(gameState);
+                const step = reduce(gameState, playerAction);
+                gameState = step.after;
+                playerAction = await render(step);
             }    
-            // Refresh the shoe if needed
-            if (needsRefresh(gameState.shoe)) {
-                printSpaced("Current shoe is exhausted");
-                await sleep(1);
-                await displayAnimation(RESHUFFLE_ANIMATION);
-                gameState = refreshShoe(gameState);
-            }
             gameState = {...gameState, gamePhase: 'bet'};
         }
 
@@ -146,11 +139,11 @@ process.on('SIGINT', () => process.exit(130));
 
 main();
 
-function reduce(state: GameState, action: PlayerAction): GameState {
+function reduce(state: GameState, action: PlayerAction): Step {
     // ONLY CALL THIS FUNCTION WHEN THE PLAYER HITS ENTER
+    const PREV_STATE = state;
+    const EVENTS: GameEvent[] = [];
 
-    // Clear old game events
-    state = {...state, events: []};
     switch (action.type) {
         case 'bet': {
             // Finish Game/State setup with amount wagered. Also functions as a reset
@@ -165,79 +158,78 @@ function reduce(state: GameState, action: PlayerAction): GameState {
                 }],
                 dealerHand: {
                     drawn: [],
-                    holeRevealed: false
+                    holeRevealed: false,
+                    playedOut: false
                 },
                 activeHand: 0,
                 insurance: 0
             };
 
             // The player has bet -> deal out cards and check for player blackjack
-            state = hit(hit(hit(hit(state, 'player'), 'dealer'), 'player'), 'dealer');
-            state = {...state, events: [...state.events, {type: 'initialDeal'}]};
+            state = hit(hit(hit(hit(state, 'player', EVENTS), 'dealer', EVENTS), 'player', EVENTS), 'dealer', EVENTS);
+
+            // Return before = after = state on error -> before == after is an error signal with a log up until the failure
             const startingHand: Hand | undefined = state.hands[state.activeHand];
-            if (!startingHand) return state;
+            if (!startingHand) return {before: state, action: action, after: state, events: EVENTS};
             if (isBlackjack(startingHand)) {
-                state = {...state, events: [...state.events, {type: 'playerBlackjack'}]};
-                return settleHands(state);
+                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
             }
 
             // Offer insurance on dealer ace
             if (state.dealerHand.upcard?.rank === 'A' && state.bank >= 1) {
                 // Transition to insurance offer
-                return {...state, gamePhase: 'insurance'};
+                return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
             }
 
             // Check for dealer blackjack
             if (isBlackjack(state.dealerHand)) {
-                return settleHands(state);
+                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
             }
 
             // Transition to gameplay
-            return {...state, gamePhase: 'play'};
+            return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'play'}, events: EVENTS};
         }
         case 'insurance': {
             // Record and deduct insurance bet
             state = {...state, insurance: action.amount, bank: state.bank - action.amount};
-            state = {...state, events: [...state.events, {type: 'insuranceResolved'}]};
 
             // Dealer checks for blackjack
             if (isBlackjack(state.dealerHand)) {
-                return settleHands(state);
+                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
             }
             else {
-                return {...state, gamePhase: 'play'};
+                return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'play'}, events: EVENTS};
             }
         }
         case 'hit': {
-            state = hit(state, 'player');
+            state = hit(state, 'player', EVENTS);
 
             // Check whether the player busted and settle accordingly
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return {...state};
+                return {before: state, action: action, after: state, events: EVENTS};
             }
             else {               
                 if(handTotal(currentHand) > 21) {
-                    state = {...state, events: [...state.events, {type: 'handBusted'}]};
-                    if(isLastHand(state)) return settleHands(state);
-                    return activateNextHand(state);
+                    if(isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
+                    return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
                 }
                 else {
-                    return {...state};
+                    return {before: PREV_STATE, action: action, after: {...state}, events: EVENTS};
                 }
             }
         }
         case 'stand': {
-            if (isLastHand(state)) return settleHands(state);
-            return activateNextHand(state);
+            if (isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
+            return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
         }
         case 'double': {
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return state;
+                return {before: state, action: action, after: state, events: EVENTS};
             }
             else {
-                state = hit(state, 'player');
+                state = hit(state, 'player', EVENTS);
                 state = {
                     ...state,
                     hands: state.hands.map((hand, index) => index == state.activeHand ? 
@@ -246,21 +238,16 @@ function reduce(state: GameState, action: PlayerAction): GameState {
                     bank: state.bank - currentHand.bet
                 }
 
-                // Check whether the doubled hand busted on its one card
-                const doubledHand: Hand | undefined = state.hands[state.activeHand];
-                if (doubledHand && handTotal(doubledHand) > 21) {
-                    state = {...state, events: [...state.events, {type: 'handBusted'}]};
-                }
-                if (isLastHand(state)) return settleHands(state);
-                return activateNextHand(state);
+                if (isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
+                return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
             }    
         }
         case 'split': {
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return state;
+                return {before: state, action: action, after: state, events: EVENTS};
             }
-            state = split(state);
+            state = split(state, EVENTS);
 
             // Aces were split -> game may need to be settled now
             if (currentHand.cards[0]?.rank == 'A') {
@@ -273,65 +260,34 @@ function reduce(state: GameState, action: PlayerAction): GameState {
                     }
                     index++;
                 }
-                return nextHand == -1 ? settleHands(state) : {...state, activeHand: nextHand};
+                return nextHand == -1 ?
+                    {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS}
+                    : {before: PREV_STATE, action: action, after: {...state, activeHand: nextHand}, events: EVENTS};
             }
             else {
-                return {...state};
+                return {before: PREV_STATE, action: action, after: {...state}, events: EVENTS};
             }
         }
         case 'surrender': {
-            return settleSurrender(state);
+            return {before: PREV_STATE, action: action, after: settleSurrender(state, EVENTS), events: EVENTS};
         }
     }
 }
 
-async function render(state: GameState): Promise<PlayerAction | undefined> {
-    const PHASE = state.gamePhase;
+async function render(step: Step): Promise<PlayerAction | undefined> {
+    const STATE = step.after;
+    const PHASE = STATE.gamePhase;
 
-    // Process internal game events before standard phase events
-    for (const event of state.events) {
+    // Process logged internal events before standard game events
+    for (const event of step.events) {
         switch (event.type) {
-            case 'initialDeal': {
-                const [firstCard, secondCard] = state.hands[0]?.cards ?? [];
-                const upCard = state.dealerHand.upcard;
-                if (firstCard && secondCard && upCard) {
-                    await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
-                    await sleep(0.5);
-                }
-                break;
-            }
-            case 'playerBlackjack': {
-                await displayAnimation(playerBlackjackAnimation);
-                await sleep(0.5);
-                break;
-            }
-            case 'insuranceResolved': {
-                if (isBlackjack(state.dealerHand)) {
-                    printSpaced("Good instincts: Dealer has blackjack");
-                    await sleep(1.25);
-                    printSpaced(`Insurance bet wins (+$${state.insurance * 2})`);
-                    await sleep(2);
-                }
-                else {
-                    printSpaced("Dealer does not have blackjack");
-                    await sleep(1.25);
-                    if (state.insurance > 0) {
-                        printSpaced(`Insurance bet loses (-$${state.insurance})`);
-                        await sleep(2);
-                    }
-                }  
-                break;              
-            }
             case 'reshuffle': {
-                printSpaced("Shoe has been emptied");
-                await sleep(1.25);
-                await displayAnimation(RESHUFFLE_ANIMATION);
-                await sleep(0.5);
-                break;
-            }
-            case 'handBusted': {
-                printSpaced("Hand busted");
-                await sleep(1.5);
+                if (event.cause == 'empty') {
+                    printSpaced("Shoe has been emptied");
+                    await sleep(1.25);
+                    await displayAnimation(RESHUFFLE_ANIMATION);
+                    await sleep(0.5);
+                }               
                 break;
             }
         }
@@ -339,6 +295,14 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
 
     switch (PHASE) {
         case 'insurance': {
+            // Render the deal animation
+            const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
+            const upCard = STATE.dealerHand.upcard;
+            if (firstCard && secondCard && upCard) {
+                await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+                await sleep(0.5);
+            }
+
             // Offer insurance and take insurance bet
             printSpaced("Dealer is showing an A: would you like to buy insurance? (Y - Yes | N - No)");
             await sleep(1.5);
@@ -350,7 +314,7 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
                 return { type: 'insurance', amount: 0 };
             }
             else {
-                const max = maxInsurance(state.hands[0]?.bet, state.bank);
+                const max = maxInsurance(STATE.hands[0]?.bet, STATE.bank);
                 let insuranceBet: number;
                 do {
                     printSpaced(`Enter your insurance bet ($1 - $${max})`);
@@ -373,11 +337,39 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
             }
         }
         case 'play': {
+            // Render deal animation if coming straight from the bet
+            if (step.action.type == 'bet') {
+                const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
+                const upCard = STATE.dealerHand.upcard;
+                if (firstCard && secondCard && upCard) {
+                    await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+                    await sleep(0.5);
+                }
+            }
+
+            // Display insurance loss if taken
+            if (step.action.type == 'insurance') {
+                printSpaced("Dealer does not have blackjack");
+                await sleep(1.25);
+                if (STATE.insurance > 0) {
+                    printSpaced(`Insurance bet loses (-$${STATE.insurance})`);
+                    await sleep(2);
+                }
+            } 
+
+            // Display player bust if last hand went over 21
+            const lastHand: Hand | undefined = STATE.hands[step.before.activeHand];
+            const hitOrDouble = step.action.type == 'hit' || step.action.type == 'double';
+            if (hitOrDouble && lastHand && handTotal(lastHand) > 21) {
+                printSpaced("Hand busted");
+                await sleep(1.5);
+            }
+
             // Display the gameboard and prompt for user move
-            const gameBoard = buildGameBoard(state);
+            const gameBoard = buildGameBoard(STATE);
             printSpaced(gameBoard);
             await sleep(1);
-            const availableActions = availableMoves(state);  
+            const availableActions = availableMoves(STATE);  
             const playerAction: Action = await actionPrompt(availableActions);
             switch(playerAction) {
                 case 'H': return { type: 'hit' };
@@ -388,37 +380,69 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
             }
         }
         case 'settle': {
+            // Play animation for player blackjack
+            // Only display the deal animation if the player doesn't have blackjack
+            if (step.after.hands.some(isBlackjack)) {
+                await displayAnimation(playerBlackjackAnimation);
+                await sleep(0.5);
+            }
+            else if (step.action.type == 'bet' && isBlackjack(STATE.dealerHand)) {
+                const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
+                const upCard = STATE.dealerHand.upcard;
+                if (firstCard && secondCard && upCard) {
+                    await displayAnimation(dealAnimation(firstCard, secondCard, upCard));
+                    await sleep(0.5);
+                }
+            } 
+
+            // Display insurance win if taken
+            if (step.action.type == 'insurance') {
+                printSpaced("Good instincts: Dealer has blackjack");
+                await sleep(1.25);
+                printSpaced(`Insurance bet wins (+$${STATE.insurance * 2})`);
+                await sleep(2);
+            }
+
+            // Display player bust if last hand went over 21
+            const lastHand: Hand | undefined = STATE.hands[step.before.activeHand];
+            const hitOrDouble = step.action.type == 'hit' || step.action.type == 'double';
+            if (hitOrDouble && lastHand && handTotal(lastHand) > 21) {
+                printSpaced("Hand busted");
+                await sleep(1.5);
+            }
+            
+            // Display settlement & dealer play
             printSpaced('Hands Finished');
             await sleep(1);
-            const dealerResult = isBlackjack(state.dealerHand) ? 
+            const dealerResult = isBlackjack(STATE.dealerHand) ? 
                 'Dealer has blackjack' 
-                : handTotal(state.dealerHand) > 21 ? 
+                : handTotal(STATE.dealerHand) > 21 ? 
                 'Dealer busts'
-                : `Dealer finishes at ${handTotal(state.dealerHand)}`;
+                : `Dealer finishes at ${handTotal(STATE.dealerHand)}`;
             printSpaced(dealerResult);
             await sleep(1);
             output.write('RESULTS:\n');
             await sleep(2);
 
-            const handsWon = `${state.hands.filter((hand) => hand.result == 'win').length}/${state.hands.length}`;
-            let playerNet = state.hands.reduce((net, hand) => {
+            const handsWon = `${STATE.hands.filter((hand) => hand.result == 'win').length}/${STATE.hands.length}`;
+            let playerNet = STATE.hands.reduce((net, hand) => {
                 switch (hand.result) {
-                    case 'win': return isBlackjack(hand) ? net + hand.bet * state.rules.blackjackPays : net + hand.bet;
+                    case 'win': return isBlackjack(hand) ? net + hand.bet * STATE.rules.blackjackPays : net + hand.bet;
                     case 'loss': return net - hand.bet;
                     case 'push': return net;
                     case 'surrender': return net - hand.bet / 2;
                     case 'pending': throw new Error('Game phase is settle but pending hand found');
                 }
             }, 0);
-            if (state.insurance > 0) {
-                if (isBlackjack(state.dealerHand) && state.hands.length == 1 && state.hands[0]?.result == 'loss') {
-                    playerNet += state.insurance * 2;
+            if (STATE.insurance > 0) {
+                if (isBlackjack(STATE.dealerHand) && STATE.hands.length == 1 && STATE.hands[0]?.result == 'loss') {
+                    playerNet += STATE.insurance * 2;
                 }
                 else {
-                    playerNet -= state.insurance;
+                    playerNet -= STATE.insurance;
                 }
             }
-            if (!state.hands.some((hand) => hand.result != 'push')) {
+            if (!STATE.hands.some((hand) => hand.result != 'push')) {
                 output.write('Push  |  Net $0');
             }
             else {
@@ -426,6 +450,13 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
             }          
             await sleep(3);
             output.write('\n\n');
+
+            // Reshuffle between rounds if needed
+            if (step.events.some((event) => event.type == 'reshuffle' && event.cause == 'cutcard')) {
+                printSpaced("Current shoe is exhausted");
+                await sleep(1);
+                await displayAnimation(RESHUFFLE_ANIMATION);
+            }
 
             // End of game loop
             return undefined;
@@ -435,11 +466,11 @@ async function render(state: GameState): Promise<PlayerAction | undefined> {
     return undefined;
 }
 
-function hit(state: GameState, to: 'player' | 'dealer'): GameState {
+function hit(state: GameState, to: 'player' | 'dealer', log: GameEvent[]): GameState {
     // Nothing left to deal -> refresh the shoe
     if (state.shoe.cardsRemaining.length == 0) {
         state = refreshShoe(state);
-        state = {...state, events: [...state.events, {type: 'reshuffle', cause: 'empty'}]};
+        log.push({type: 'reshuffle', cause: 'empty'});
     }
 
     const nextCard: Card | undefined = state.shoe.cardsRemaining[0];
@@ -479,7 +510,7 @@ function hit(state: GameState, to: 'player' | 'dealer'): GameState {
     }
 }
 
-function split(state: GameState): GameState {
+function split(state: GameState, log: GameEvent[]): GameState {
     const currentHand: Hand | undefined = state.hands[state.activeHand];
     if (!currentHand) {
         return state;
@@ -505,11 +536,11 @@ function split(state: GameState): GameState {
             ),
             bank: state.bank - bet
         };
-        state = hit(state, 'player');
+        state = hit(state, 'player', log);
 
         // Split aces are both hit -> Hit next hand as well then return activeHand to normal
         if (currentHand.cards[0]?.rank == 'A') {
-            state = hit({...state, activeHand: state.activeHand + 1}, 'player');
+            state = hit({...state, activeHand: state.activeHand + 1}, 'player', log);
             state = {...state, activeHand: state.activeHand - 1};
         }
         return {...state};
@@ -519,7 +550,7 @@ function split(state: GameState): GameState {
     return {...state};
 }
 
-function activateNextHand(state: GameState): GameState {
+function activateNextHand(state: GameState, log: GameEvent[]): GameState {
     // Playing right to left activeHand + 1 is always next
     state = {...state, activeHand: state.activeHand + 1};
     const currentHand: Hand | undefined = state.hands[state.activeHand];
@@ -528,11 +559,11 @@ function activateNextHand(state: GameState): GameState {
     }
     else {
         // If hand is from a non-ace split it needs an extra card
-        return currentHand.cards.length < 2 ? hit(state, 'player') : {...state};
+        return currentHand.cards.length < 2 ? hit(state, 'player', log) : {...state};
     }
 }
 
-function settleHands(state: GameState): GameState {
+function settleHands(state: GameState, log: GameEvent[]): GameState {
     // Transition to settle and reveal the dealer's hole 
     state = {...state, dealerHand: {...state.dealerHand, holeRevealed: true}, gamePhase: 'settle'};
 
@@ -540,8 +571,9 @@ function settleHands(state: GameState): GameState {
     // Don't play if player fully busted or has natural blackjack
     const naturalBlackjack = state.hands.some(isBlackjack);
     if (state.hands.some((hand) => handTotal(hand) <= 21) && !naturalBlackjack) {
-        while (handTotal(state.dealerHand) < 17) state = hit(state, 'dealer');
-        if (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17) state = hit(state, 'dealer');
+        state = {...state, dealerHand: {...state.dealerHand, playedOut: true}};
+        while (handTotal(state.dealerHand) < 17) state = hit(state, 'dealer', log);
+        if (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17) state = hit(state, 'dealer', log);
     }
     const dealerBlackjack = isBlackjack(state.dealerHand);
 
@@ -578,16 +610,28 @@ function settleHands(state: GameState): GameState {
         }
     });
 
+    // Game is over -> refresh the shoe if needed
+    if (needsRefresh(gameState.shoe)) {
+        state = refreshShoe(state);
+        log.push({type: 'reshuffle', cause: 'cutcard'});
+    }
+
     return {...state, hands: settledHands, bank: state.bank + totalPayout};
 }
 
-function settleSurrender(state: GameState): GameState {
+function settleSurrender(state: GameState, log: GameEvent[]): GameState {
     const bet = state.hands[0]?.bet;
     const currentHand: Hand | undefined = state.hands[0];
     if (!bet || !currentHand) {     
         throw new Error('Error returning bet to player');
     }
     else {
+        // Game is over -> refresh the shoe if needed
+        if (needsRefresh(gameState.shoe)) {
+            state = refreshShoe(state);
+            log.push({type: 'reshuffle', cause: 'cutcard'});
+        }
+
         // Return 1/2 bet, switch phase to settle, record surrender, reveal hole card
         return {
             ...state, 
@@ -835,7 +879,7 @@ async function actionPrompt(legalActions: readonly Action[]): Promise<Action> {
 function parseAction(input: string): Action | undefined {
     input = input.toLowerCase();
     if (['h', 'hi', 'hit', 'hits'].includes(input)) return 'H';
-    if (['s', 'st', 'stan', 'stand', 'stands'].includes(input)) return 'S';
+    if (['s', 'st', 'stan', 'stay', 'stand', 'stands'].includes(input)) return 'S';
     if (['d', 'do', 'doub', 'double', 'doubles'].includes(input)) return 'D';
     if (['p', 'sp', 'spl', 'split', 'splits'].includes(input)) return 'P';
     if (['r', 'su', 'sur', 'surren', 'surrender', 'surrenders'].includes(input)) return 'R';

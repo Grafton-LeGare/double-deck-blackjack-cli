@@ -79,6 +79,7 @@ export type DealerHand = {
     readonly hole?: Card;
     readonly drawn: readonly Card[];
     readonly holeRevealed: boolean;
+    readonly playedOut: boolean
 };
 
 
@@ -110,12 +111,7 @@ export type PlayerAction =
 
 // STATE
 export type GameEvent = 
-    | { readonly type: 'reshuffle'; readonly cause: 'cutcard' | 'empty' }
-    | { readonly type: 'initialDeal' }
-    | { readonly type: 'playerBlackjack' }
-    | { readonly type: 'insuranceResolved' }
-    | { readonly type: 'handBusted' }
-    | { readonly type: 'dealerDraw' };
+    | { readonly type: 'reshuffle'; readonly cause: 'cutcard' | 'empty' };
 
 export type GameState = {
     readonly rules: RuleSet;
@@ -126,6 +122,12 @@ export type GameState = {
     readonly activeHand: number;
     readonly gamePhase: 'bet' | 'insurance' | 'play' | 'settle';
     readonly insurance: number;
-    readonly bank: number;
+    readonly bank: number
+};
+
+export type Step = {
+    readonly before: GameState;
+    readonly action: PlayerAction;
+    readonly after: GameState;
     readonly events: readonly GameEvent[]
 };
