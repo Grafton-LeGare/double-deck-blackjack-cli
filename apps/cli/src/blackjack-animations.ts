@@ -60,8 +60,8 @@ const RESHUFFLE_FRAMES: readonly string[] = ['Reshuffling the shoe.', 'Reshuffli
 
 export const RESHUFFLE_ANIMATION: Animation = {
     frames: RESHUFFLE_FRAMES,
-    timePerFrame: 1/3,
-    duration: 2
+    timePerFrame: 0.5,
+    duration: 3
 };
 
 export function formatCard(card: Card | undefined): string {
@@ -101,8 +101,38 @@ const playerBlackjackFrames: readonly string[] = [
      '    • Player blackjack! •'
 ];
 
-export const playerBlackjackAnimation: Animation = {
+export const PLAYER_BLACKJACK_ANIMATION: Animation = {
      frames: playerBlackjackFrames,
      timePerFrame: 0.25,
+     duration: 3
+};
+
+export const DOUBLE_ANIMATION: Animation = {
+     frames: ['Double down!', 'Double down! !'],
+     timePerFrame: 0.75,
+     duration: 3
+};
+
+export const SPLIT_ANIMATION: Animation = {
+     frames: ['  SPLIT  ', 'S P L I T'],
+     timePerFrame: 0.75,
+     duration: 3
+};
+
+export const SPLIT_HAND_ANIMATION: Animation = {
+     frames: ["Playing first hand.", "Playing first hand..", "Playing first hand..."],
+     timePerFrame: 0.5,
+     duration: 3
+};
+
+export const NEXT_HAND_ANIMATION: Animation = {
+     frames: ["Moving to next hand.", "Moving to next hand..", "Moving to next hand..."],
+     timePerFrame: 0.5,
+     duration: 3
+};
+
+export const SURRENDER_ANIMATION: Animation = {
+     frames: ["Surrendered!  |▭", "Surrendered!  ▭|"],
+     timePerFrame: 0.5,
      duration: 3
 };
