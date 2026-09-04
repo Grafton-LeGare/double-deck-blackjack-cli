@@ -103,6 +103,7 @@ export type Action = 'H' | 'S' | 'D' | 'P' | 'R';
 export type PlayerAction = 
     | { readonly type: 'bet';               readonly amount: number }
     | { readonly type: 'insurance';    readonly amount: number }
+    | { readonly type: 'evenMoney' }
     | { readonly type: 'hit' }
     | { readonly type: 'stand' }
     | { readonly type: 'double' }

@@ -53,13 +53,13 @@ const TEST_SHOE_FILLER: Card[] = Array.from({ length: 40 }, (_, i) => {
 // Test shoe: Swap in for `shoe` above to manually exercise specific flows.
 const testShoe: Shoe = {
     decks: gameRules.decks,
-    cutCardPosition: 8, // getCutCardPosition(gameRules),
+    cutCardPosition: 16, // getCutCardPosition(gameRules),
     cardsDealt: 0,
     cardsRemaining: [
-        { rank: '9', suit: 'S' }, // player card 1
+        { rank: 'A', suit: 'S' }, // player card 1
         { rank: 'A', suit: 'S' }, // dealer upcard
-        { rank: '9', suit: 'C' }, // player card 2
-        { rank: '5', suit: 'S' }, // dealer hole
+        { rank: 'K', suit: 'C' }, // player card 2
+        { rank: 'J', suit: 'H' }, // dealer hole
         { rank: '9', suit: 'D' }, // split card 1
         ...TEST_SHOE_FILLER
     ]
@@ -207,6 +207,10 @@ function reduce(state: GameState, action: PlayerAction): Step {
             const startingHand: Hand | undefined = state.hands[state.activeHand];
             if (!startingHand) return {before: state, action: action, after: state, events: EVENTS};
             if (isBlackjack(startingHand)) {
+                if (state.dealerHand.upcard?.rank === 'A') {
+                    // Offer even money on Blackjack vs A
+                    return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
+                }
                 return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
             }
 
@@ -229,12 +233,26 @@ function reduce(state: GameState, action: PlayerAction): Step {
             state = {...state, insurance: action.amount, bank: state.bank - action.amount};
 
             // Dealer checks for blackjack
-            if (isBlackjack(state.dealerHand)) {
+            // player blackjack vs A also goes through this flow
+            const startingHand: Hand | undefined = state.hands[state.activeHand];
+            if (isBlackjack(state.dealerHand) || (startingHand && isBlackjack(startingHand))) {
                 return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
             }
             else {
                 return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'play'}, events: EVENTS};
             }
+        }
+        case 'evenMoney': {
+            // Even money IS the insurance bet a natural would have to make to lock in 1:1 --
+            // half the wager, paid 2:1 on a dealer natural, lost otherwise. Settling it as that
+            // bet lands on +1x the wager down both branches, and keeps one payout path.
+            const currentHand: Hand | undefined = state.hands[state.activeHand];
+            if (!currentHand || !isBlackjack(currentHand)) return {before: state, action: action, after: state, events: EVENTS};
+
+            const evenMoneyBet = currentHand.bet / 2;
+            state = {...state, insurance: evenMoneyBet, bank: state.bank - evenMoneyBet};
+
+            return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
         }
         case 'hit': {
             state = hit(state, 'player', EVENTS);
@@ -328,10 +346,42 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
 
     switch (PHASE) {
         case 'insurance': {
-            // Render the deal animation, then display its last frame over every message
-            // player should still see the dealer's ace and their own hand while deciding
+            // A natural against an ace is offered even money rather than insurance: the same
+            // half-bet wager, taken as a certain 1:1 instead of gambling 3:2 against a push
+            const startingHand: Hand | undefined = STATE.hands[STATE.activeHand];
             const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
             const upCard = STATE.dealerHand.upcard;
+
+            if (startingHand && isBlackjack(startingHand)) {
+                const pbjAnimation = playerBlackjackAnimation();
+                await paintAnimation(pbjAnimation, 1);
+
+                // Hold the natural on screen and deal the table in underneath it
+                let headline = pbjAnimation.frames[pbjAnimation.frames.length - 1] ?? '';
+                if (firstCard && secondCard && upCard) {
+                    const dAnimation = dealAnimation(firstCard, secondCard, upCard);
+                    const dealUnderHeadline: Animation = {
+                        ...dAnimation,
+                        frames: dAnimation.frames.map((frame) => `${headline}\n\n${frame}`)
+                    };
+                    await paintAnimation(dealUnderHeadline, 0.5);
+                    headline = dealUnderHeadline.frames[dealUnderHeadline.frames.length - 1] ?? headline;
+                }
+
+                const OFFER = "Dealer is showing an A: would you like even money? (Y - Yes | N - No)";
+                const response = (await paintedPrompt(`${headline}\n\n${OFFER}`, () => [], 1)).toLowerCase();
+                if (!['y', 'yes', 'ye', 'yeah'].includes(response)) {
+                    // Declined -> the natural settles on its own: 3:2, or a push against a dealer natural
+                    await paint(`${headline}\n\n${OFFER}\n\nLetting it ride...`, 1.5);
+
+                    return { type: 'insurance', amount: 0 };
+                }
+
+                return { type: 'evenMoney' };
+            }
+
+            // Render the deal animation, then display its last frame over every message
+            // player should still see the dealer's ace and their own hand while deciding
             const deal: Animation | undefined = firstCard && secondCard && upCard ?
                 dealAnimation(firstCard, secondCard, upCard)
                 : undefined;
@@ -405,11 +455,30 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             }
         }
         case 'settle': {
-            // Play animation for player blackjack
-            // Only display the deal animation if the player doesn't have blackjack
-            if (step.after.hands.some(isBlackjack)) {
+            // Player took Even Money -> pay it and drop straight back to the menu
+            if (step.action.type == 'evenMoney') {
+                const wager = STATE.hands[0]?.bet ?? 0;
+                const HEADLINE = `Accepted even money (+${formatCurrency(wager)})`;
+                await paint(HEADLINE, 2);
+                await paint(`${HEADLINE}\n\nHand is now settled`, 2);
+
+                // Reshuffle between rounds if needed
+                if (step.events.some((event) => event.type == 'reshuffle' && event.cause == 'cutcard')) {
+                    await paint("Current shoe is exhausted", 1.5);
+                    await paintAnimation(RESHUFFLE_ANIMATION);
+                }
+
+                return undefined;
+            }
+
+            // Insurance/Even Money shows the blackjack animation so don't duplicate it here
+            // (taking even money returns above, so declining is all that reaches this)
+            const blackjackAlreadyShown = step.action.type == 'insurance';
+            if (step.after.hands.some(isBlackjack) && !blackjackAlreadyShown) {
                 await paintAnimation(playerBlackjackAnimation(), 0.25);
             }
+            
+            // Only display the deal animation if the player doesn't have blackjack
             else if (step.action.type == 'bet' && isBlackjack(STATE.dealerHand)) {
                 const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
                 const upCard = STATE.dealerHand.upcard;
@@ -1218,7 +1287,7 @@ async function paintMoveFeedback(step: Step) {
             await paintAnimation(overBoard(PREV_BOARD, SURRENDER_ANIMATION));
             break;
         }
-        case 'bet' : case 'insurance': return;
+        case 'bet' : case 'insurance': case 'evenMoney': return;
     }
 }
 
