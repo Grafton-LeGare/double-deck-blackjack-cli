@@ -9,7 +9,7 @@ import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/bla
 import type { Animation } from './blackjack-animations.ts';
 import { 
     GREETING_ANIMATION, RESHUFFLE_ANIMATION, formatCard, 
-    dealAnimation, PLAYER_BLACKJACK_ANIMATION, DOUBLE_ANIMATION,
+    dealAnimation, playerBlackjackAnimation, DOUBLE_ANIMATION,
     SPLIT_ANIMATION, SPLIT_HAND_ANIMATION, NEXT_HAND_ANIMATION,
     SURRENDER_ANIMATION 
 } from './blackjack-animations.ts';
@@ -24,7 +24,7 @@ const defaultGameRules: RuleSet = {
     rsa: true,
     das: true,
     maxHands: 4,
-    surrender: false,
+    surrender: true,
     blackjackPays: 1.5,
     penetration: 0.75,
     penMode: 'notch'
@@ -40,6 +40,32 @@ let shoe: Shoe = {
     cutCardPosition: getCutCardPosition(gameRules),
     cardsDealt: 0,
     cardsRemaining: shuffledDeck
+};
+
+// Filler for the test shoes below -- cycles non-ace ranks/suits so nothing past the staged
+// opening cards is ever an ace, no matter how deep a hand plays into it.
+const TEST_SHOE_FILLER: Card[] = Array.from({ length: 40 }, (_, i) => {
+    const fillerRanks: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
+    const fillerSuits: Suit[] = ['S', 'C', 'H', 'D'];
+    return {
+        rank: fillerRanks[i % fillerRanks.length]!,
+        suit: fillerSuits[Math.floor(i / fillerRanks.length) % fillerSuits.length]!
+    };
+});
+
+// Test shoe: Swap in for `shoe` above to manually exercise specific flows.
+const testShoe: Shoe = {
+    decks: gameRules.decks,
+    cutCardPosition: 8, // getCutCardPosition(gameRules),
+    cardsDealt: 0,
+    cardsRemaining: [
+        { rank: '8', suit: 'S' }, // player card 1
+        { rank: '6', suit: 'S' }, // dealer upcard
+        { rank: '8', suit: 'C' }, // player card 2
+        { rank: '5', suit: 'S' }, // dealer hole
+        { rank: '8', suit: 'D' }, // split card 1
+        ...TEST_SHOE_FILLER
+    ]
 };
 
 // Initialize Game/State
@@ -370,7 +396,7 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             // Play animation for player blackjack
             // Only display the deal animation if the player doesn't have blackjack
             if (step.after.hands.some(isBlackjack)) {
-                await paintAnimation(PLAYER_BLACKJACK_ANIMATION, 0.5);
+                await paintAnimation(playerBlackjackAnimation(), 0.25);
             }
             else if (step.action.type == 'bet' && isBlackjack(STATE.dealerHand)) {
                 const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
@@ -425,7 +451,7 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             
             // Reshuffle between rounds if needed
             if (step.events.some((event) => event.type == 'reshuffle' && event.cause == 'cutcard')) {
-                await paint("Current shoe is exhausted", 1);
+                await paint("Current shoe is exhausted", 1.5);
                 await paintAnimation(RESHUFFLE_ANIMATION);
             }
 
@@ -543,8 +569,11 @@ function settleHands(state: GameState, log: GameEvent[]): GameState {
     const naturalBlackjack = state.hands.some(isBlackjack);
     if (state.hands.some((hand) => handTotal(hand) <= 21) && !naturalBlackjack && !isBlackjack(state.dealerHand)) {
         state = {...state, dealerHand: {...state.dealerHand, playedOut: true}};
-        while (handTotal(state.dealerHand) < 17) state = hit(state, 'dealer', log);
-        if (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17) state = hit(state, 'dealer', log);
+        while (handTotal(state.dealerHand) < 17 ||
+            (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17)) 
+        {
+            state = hit(state, 'dealer', log);
+        }
     }
     const dealerBlackjack = isBlackjack(state.dealerHand);
 
@@ -802,7 +831,7 @@ function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
     if (total < 21 && !splitAceHand) legalActions.push('H');
     // Standing is always legal
     legalActions.push('S');
-    if (twoCardHand(hand) && !splitAceHand && (!hand.fromSplit || rules.das)) legalActions.push('D');
+    if (twoCardHand(hand) && !splitAceHand && total < 21 && (!hand.fromSplit || rules.das)) legalActions.push('D');
     if (canSplit(hand, rules, state)) legalActions.push('P');
     if (twoCardHand(hand) && !hand.fromSplit && rules.surrender) legalActions.push('R');
     return legalActions;
@@ -967,18 +996,40 @@ function formatShoe(shoe: Shoe, perRow: number): string {
     return formattedShoe;
 }
 
+// Rows a frame actually takes up on screen -- a line wider than the window wraps onto
+// extra rows, and those count against the walk back up to the frame's first line
+function frameRows(frame: string, columns: number): number {
+    return frame
+        .split('\n')
+        .reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / columns)), 0);
+}
+
 async function displayAnimation(animation: Animation): Promise<void> {
     // ONLY USE THIS OUTSIDE THE GAME LOOP IN MAIN
     const FRAME_COUNT = animation.frames.length;
     const TIME_PER_FRAME = animation.timePerFrame;
-    const DURATION = animation.duration; 
+    const DURATION = animation.duration;
 
-    output.write("\x1b[s");
+    if (!output.isTTY) {
+        output.write(`${animation.frames[0] ?? ''}\n\n`);
+        await sleep(DURATION);
+        return;
+    }
+
+    // Walk back up by the rows just written: prevents scroll errors
+    let previousRows = 0;
     for (let i = 0; i < DURATION / TIME_PER_FRAME; i++) {
         const frame: string = animation.frames[i % FRAME_COUNT] ?? '';
-        output.write("\x1b[u");
-        output.write("\x1b[J");
+        const columns = output.columns || 80;
+
+        // Cap the walk at the window height: a frame taller than the window has already had its
+        // top scrolled away, so redraw from the top of the screen rather than overshooting
+        const climb = Math.min(previousRows - 1, (output.rows || previousRows) - 1);
+        if (climb > 0) output.write(`\x1b[${climb}A`);
+
+        output.write('\x1b[G\x1b[0J');
         output.write(frame);
+        previousRows = frameRows(frame, columns);
         await sleep(TIME_PER_FRAME);
     }
 
@@ -988,7 +1039,7 @@ async function displayAnimation(animation: Animation): Promise<void> {
 
 // Actions are hidden while the board is only being shown as a backdrop -- the line they sat
 // on and the blank one below it stay, so the board doesn't shift when the prompt returns
-function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown'): string {
+function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown', playerLine?: string): string {
     const upCard = state.dealerHand.upcard;
     const currentHand = state.hands[state.activeHand];
     if (!upCard || !currentHand) {
@@ -1005,6 +1056,7 @@ function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown')
         const dealerPad = ''.padEnd(6 + (handLength - 2) * 5, ' ');
         const betPad = ''.padEnd(13 + (handTotal(currentHand) < 10 ? 1 : 0) + (cardValue(upCard) < 10 ? 1 : 0), ' ');
         const playerCards = cardsFromHand(currentHand).map((card) => formatCard(card)).join(' ');
+        const youLine = playerLine ?? `${playerCards}${playerPad}${handTotal(currentHand)}${betPad}bet $${currentHand.bet}`;
         const availableActions = availableMoves(state);
         const actionList = availableActions.map((action) => {
             switch (action) {
@@ -1022,7 +1074,7 @@ function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown')
 ${playingHand}
 
 Dealer   ${formatCard(upCard)} [??]${dealerPad}showing ${cardValue(upCard)}
-You      ${playerCards}${playerPad}${handTotal(currentHand)}${betPad}bet $${currentHand.bet}
+You      ${youLine}
 
 ${actionLine}`
         );
@@ -1031,6 +1083,19 @@ ${actionLine}`
 
 function overBoard(board: string, animation: Animation): Animation {
     return {...animation, frames: animation.frames.map((frame) => `${board}\n${frame}`)};
+}
+
+function splitHandFrames(firstCard: Card, secondCard: Card, firstHitCard: Card, secondHitCard?: Card): string[] {
+    const SPLIT_PAD = ''.padEnd(9);
+    const SPLIT_GAP = ''.padEnd(11);
+    const card1 = formatCard(firstCard), card2 = formatCard(secondCard), hitCard1 = formatCard(firstHitCard);
+    const hitCard2 = secondHitCard ? formatCard(secondHitCard) : '';
+    const frames = [
+        `${SPLIT_PAD}${card1} ${card2}`,
+        `${card1}${SPLIT_GAP}     ${card2}`,
+        `${card1} ${hitCard1}${SPLIT_GAP}${card2} ${hitCard2}`
+    ];
+    return frames;
 }
 
 async function paintMoveFeedback(step: Step) {
@@ -1046,12 +1111,17 @@ async function paintMoveFeedback(step: Step) {
             const hitResult = handTotal(playedHand) > 21 ? 'Hand busted' : `Hand total is ${handTotal(playedHand)}`;
             await paint(PREV_BOARD, 1);
             await paint(PLAYED_BOARD, 1);
-            await paint(`${PLAYED_BOARD}\nHit ${drawnRank}: ${hitResult}`, 3);
+            await paint(`${PLAYED_BOARD}\nHit ${drawnRank}: ${hitResult}`, 2);
+
+            // Display next hand animation if the hit caused a hand change
+            if (step.before.activeHand != step.after.activeHand) {
+                await paintAnimation(overBoard(PLAYED_BOARD, NEXT_HAND_ANIMATION));
+            }
             break;
         }
         case 'stand': {
             await paint(`${PLAYED_BOARD}\nHand has been stood`, 2);
-            if (step.after.gamePhase != 'settle') {
+            if (step.before.activeHand != step.after.activeHand) {
                 await paintAnimation(overBoard(PLAYED_BOARD, NEXT_HAND_ANIMATION));
             }         
             break;
@@ -1069,8 +1139,52 @@ async function paintMoveFeedback(step: Step) {
 
             // Split the double animation between not having and having the doubled bet
             await paintAnimation(overBoard(PREV_BOARD, {...DOUBLE_ANIMATION, duration: DOUBLE_ANIMATION.duration / 2}));
-            await paintAnimation(overBoard(DOUBLED_BOARD, {...DOUBLE_ANIMATION, duration: DOUBLE_ANIMATION.duration / 2}));           
+            await paintAnimation(overBoard(DOUBLED_BOARD, {...DOUBLE_ANIMATION, duration: DOUBLE_ANIMATION.duration / 2}), 0.25);           
             await paint(`${PLAYED_BOARD}\nDealt ${drawnRank}: ${doubleResult}`, 4);
+
+            // Display next hand animation if the hit caused a hand change
+            if (step.before.activeHand != step.after.activeHand) {
+                await paintAnimation(overBoard(PLAYED_BOARD, NEXT_HAND_ANIMATION));
+            }
+            break;
+        }
+        case 'split': {
+            // Split aces can repoint activeHand, so anchor on the hand that was actually split
+            const splitIndex = step.before.activeHand;
+            const [firstCard, firstHitCard] = step.after.hands[splitIndex]?.cards ?? [];
+            const [secondCard, secondHitCard] = step.after.hands[splitIndex + 1]?.cards ?? [];
+            const lastSplitFrame = SPLIT_ANIMATION.frames[SPLIT_ANIMATION.frames.length - 1] ?? '';
+            const halfDuration = SPLIT_ANIMATION.duration / 2;
+            if (firstCard && secondCard && firstHitCard) {
+                const splitFrames: readonly string[] = splitHandFrames(firstCard, secondCard, firstHitCard, secondHitCard);
+                let index = 0;
+                for (const frame of splitFrames) {
+                    index++;
+                    const board = buildGameBoard(step.before, 'hidden', frame);
+                    if (index == splitFrames.length) {
+                        await paintAnimation(overBoard(board, {frames: [lastSplitFrame], timePerFrame: halfDuration, duration: halfDuration}));
+                        if (step.after.gamePhase != 'settle') {
+                            // Show "Moving to next hand..." instead of "First hand" on split aces (most hands don't play)
+                            if (firstCard.rank == 'A') {
+                                await paintAnimation(overBoard(board, NEXT_HAND_ANIMATION));
+                            }
+                            else {
+                                await paintAnimation(overBoard(board, SPLIT_HAND_ANIMATION));
+                            }                            
+                        }                       
+                    }      
+                    else {
+                        await paintAnimation(overBoard(board, {...SPLIT_ANIMATION, duration: halfDuration}));
+                    }                              
+                }
+            }
+            else {
+                await paintAnimation(overBoard(PREV_BOARD, SPLIT_HAND_ANIMATION));
+            }   
+            break;
+        }
+        case 'surrender': {
+            await paintAnimation(overBoard(PREV_BOARD, SURRENDER_ANIMATION));
             break;
         }
         case 'bet' : case 'insurance': return;
@@ -1115,9 +1229,11 @@ function buildResultsScreen(state: GameState): string {
     else {
         screen = `${screen}\n\nPlayer wins ${handsWon} hands  |  Net $${netPayout}`;
     }
-    
+
+    const maxHandLength = Math.max(...state.hands.map((hand) => hand.cards.length)); 
     const resultRows: string[] = state.hands.map((hand) => {
         const cards: string = cardsFromHand(hand).map((card) => formatCard(card)).join(' ');
+        const totalPad = ''.padEnd(4 + (maxHandLength - hand.cards.length) * 5);  
         const total = `Total: ${handTotal(hand)}`;
         const result = handTotal(hand) > 21 ?
             'Hand busted'
@@ -1126,7 +1242,7 @@ function buildResultsScreen(state: GameState): string {
             : hand.result == 'loss' || hand.result == 'surrender' ?
             `Dealer wins ${handTotal(state.dealerHand)}/${handTotal(hand)}`
             : 'Push';
-        return `${cards} →    ${total} →    ${result}`;
+        return `${cards} →${totalPad}${total} →    ${result}`;
     });
 
     while (resultRows.length < 4) resultRows.push('');

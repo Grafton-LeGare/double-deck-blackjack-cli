@@ -94,17 +94,47 @@ export function dealAnimation(firstCard: Card, secondCard: Card, upcard: Card): 
     return {frames: frames, timePerFrame: timePerFrame, duration: frames.length * timePerFrame};
 }
 
-const playerBlackjackFrames: readonly string[] = [
-     '    · Player blackjack! ·',
-     '    • Player blackjack! •',
-     '    * Player blackjack! *',
-     '    • Player blackjack! •'
-];
+export function playerBlackjackAnimation(): Animation {
+     const BASE_ROWS = [
+          '•••••••••••••••••••••••••',
+          '•                       •',
+          '•   Player blackjack!   •',
+          '•                       •',
+          '•••••••••••••••••••••••••'
+     ];
+     const WIDTH = BASE_ROWS[0]!.length;
 
-export const PLAYER_BLACKJACK_ANIMATION: Animation = {
-     frames: playerBlackjackFrames,
-     timePerFrame: 0.25,
-     duration: 3
+     // Every [row, col] on the border, clockwise from the top-left: across the top,
+     // down the right edge, back along the bottom, up the left edge
+     const BORDER: readonly (readonly [number, number])[] = [
+          ...Array.from({length: WIDTH}, (_, col) => [0, col] as const),
+          [1, WIDTH - 1],
+          [2, WIDTH - 1],
+          [3, WIDTH - 1],
+          ...Array.from({length: WIDTH}, (_, col) => [4, WIDTH - 1 - col] as const),
+          [3, 0],
+          [2, 0],
+          [1, 0]
+     ];
+
+     // The marker starts partway along the top edge and laps the border once
+     const START = 4;
+     const frames = BORDER.map((_, i) => {
+          const [leftStarRow, leftStarCol] = BORDER[(i - 1 + START) % BORDER.length]!;
+          const [row, col] = BORDER[(i + START) % BORDER.length]!;
+          const [rightStarRow, rightStarCol] = BORDER[(i + 1 + START) % BORDER.length]!;
+          const rows = [...BASE_ROWS];
+          rows[leftStarRow] = `${rows[leftStarRow]!.slice(0, leftStarCol)}✦${rows[leftStarRow]!.slice(leftStarCol + 1)}`;
+          rows[row] = `${rows[row]!.slice(0, col)}*${rows[row]!.slice(col + 1)}`;
+          rows[rightStarRow] = `${rows[rightStarRow]!.slice(0, rightStarCol)}✦${rows[rightStarRow]!.slice(rightStarCol + 1)}`;
+          return rows.join('\n');
+     });
+
+     return {
+          frames: frames,
+          timePerFrame: 1 / frames.length,
+          duration: 3
+     };
 };
 
 export const DOUBLE_ANIMATION: Animation = {
@@ -122,17 +152,22 @@ export const SPLIT_ANIMATION: Animation = {
 export const SPLIT_HAND_ANIMATION: Animation = {
      frames: ["Playing first hand.", "Playing first hand..", "Playing first hand..."],
      timePerFrame: 0.5,
-     duration: 3
+     duration: 1.5
 };
 
 export const NEXT_HAND_ANIMATION: Animation = {
      frames: ["Moving to next hand.", "Moving to next hand..", "Moving to next hand..."],
      timePerFrame: 0.5,
-     duration: 3
+     duration: 1.5
 };
 
 export const SURRENDER_ANIMATION: Animation = {
-     frames: ["Surrendered!  |▭", "Surrendered!  ▭|"],
-     timePerFrame: 0.5,
+     frames: [
+          "Surrendered!  |▔▔▔",
+          "Surrendered!  |─▔▔",
+          "Surrendered!  |▔─▔",
+          "Surrendered!  |▔▔─"
+     ],
+     timePerFrame: 0.15,
      duration: 3
 };
