@@ -1,5 +1,5 @@
-import type { Card } from '../../../packages/blackjack/src/blackjack-types.ts';
-import { SUIT_SYMBOLS } from '../../../packages/blackjack/src/blackjack-types.ts';
+import type { Card } from '@doubledeck/blackjack';
+import { SUIT_SYMBOLS } from '@doubledeck/blackjack';
 
 export type Animation = {
     readonly frames: readonly string[];

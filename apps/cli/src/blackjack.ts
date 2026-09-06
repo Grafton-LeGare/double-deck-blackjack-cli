@@ -1,9 +1,9 @@
 import type {
-    Rank, Suit, Card, Shoe, RuleSet, Casino, DealerHand, RunningCount, Hand, Action, PlayerAction, 
+    Rank, Suit, Card, Shoe, RuleSet, Casino, DealerHand, RunningCount, Hand, Action, PlayerAction,
     GameState, GameEvent, Step,
-} from '../../../packages/blackjack/src/blackjack-types.ts';
+} from '@doubledeck/blackjack';
 
-import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '../../../packages/blackjack/src/blackjack-types.ts';
+import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '@doubledeck/blackjack';
 
 import type { Animation } from './blackjack-animations.ts';
 
@@ -56,8 +56,8 @@ const testShoe: Shoe = {
     cutCardPosition: 16, // getCutCardPosition(gameRules),
     cardsDealt: 0,
     cardsRemaining: [
-        { rank: 'A', suit: 'S' }, // player card 1
-        { rank: 'A', suit: 'S' }, // dealer upcard
+        { rank: 'T', suit: 'S' }, // player card 1
+        { rank: '3', suit: 'S' }, // dealer upcard
         { rank: 'K', suit: 'C' }, // player card 2
         { rank: 'J', suit: 'H' }, // dealer hole
         { rank: '9', suit: 'D' }, // split card 1
@@ -73,6 +73,9 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
     trailingZeroDisplay: 'stripIfInteger'
 });
 const formatCurrency = (amount: number) => currencyFormatter.format(amount);
+
+// Keep track of whether we're in the constructed window or the actual terminal for errors
+let inAltScreen: boolean = false;
 
 async function main() {
     // Initialize Game/State
@@ -109,6 +112,7 @@ async function main() {
 
         if (userResponse == 'p' || userResponse == 'play') {
             output.write('\x1b[?1049h');
+            inAltScreen = true;
             try {
                 // Take the player's bet
                 const BET_SCREEN = firstHand ? "Mazel tov!!!\n\nHow much do you bet? ([X] - X dollars)" : "How much do you bet? ([X] - X dollars)";
@@ -133,6 +137,7 @@ async function main() {
             }
             finally {
                 output.write('\x1b[?1049l');
+                inAltScreen = false;
                 await sleep(0.5);
             }    
             gameState = {...gameState, gamePhase: 'bet'};         
@@ -169,10 +174,16 @@ async function main() {
 }
 
 // This application can PERMANENTLY hide the cursor - this makes sure you always get it back.
-process.on('exit', () => output.write('\x1b[?25h'));
+process.on('exit', () => {
+    if (inAltScreen) {
+        output.write('\x1b[?1049l');
+        inAltScreen = false;
+    }    
+    output.write('\x1b[?25h');
+});
 process.on('SIGINT', () => process.exit(130));
 
-main();
+main().catch((err) => { console.error(err); process.exit(1) });
 
 function reduce(state: GameState, action: PlayerAction): Step {
     // ONLY CALL THIS FUNCTION WHEN THE PLAYER HITS ENTER
@@ -203,11 +214,12 @@ function reduce(state: GameState, action: PlayerAction): Step {
             // The player has bet -> deal out cards and check for player blackjack
             state = hit(hit(hit(hit(state, 'player', EVENTS), 'dealer', EVENTS), 'player', EVENTS), 'dealer', EVENTS);
 
-            // Return before = after = state on error -> before == after is an error signal with a log up until the failure
             const startingHand: Hand | undefined = state.hands[state.activeHand];
-            if (!startingHand) return {before: state, action: action, after: state, events: EVENTS};
+            if (!startingHand) throw new Error("Starting hand is undefined after the initial deal.");
+            const upcard: Card | undefined = state.dealerHand.upcard;
+            if (!upcard) throw new Error("Dealer upcard is undefined after the initial deal.");
             if (isBlackjack(startingHand)) {
-                if (state.dealerHand.upcard?.rank === 'A') {
+                if (upcard.rank === 'A') {
                     // Offer even money on Blackjack vs A
                     return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
                 }
@@ -215,7 +227,7 @@ function reduce(state: GameState, action: PlayerAction): Step {
             }
 
             // Offer insurance on dealer ace
-            if (state.dealerHand.upcard?.rank === 'A' && state.bank >= 1) {
+            if (upcard.rank === 'A' && state.bank >= 1) {
                 // Transition to insurance offer
                 return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
             }
@@ -247,7 +259,7 @@ function reduce(state: GameState, action: PlayerAction): Step {
             // half the wager, paid 2:1 on a dealer natural, lost otherwise. Settling it as that
             // bet lands on +1x the wager down both branches, and keeps one payout path.
             const currentHand: Hand | undefined = state.hands[state.activeHand];
-            if (!currentHand || !isBlackjack(currentHand)) return {before: state, action: action, after: state, events: EVENTS};
+            if (!currentHand || !isBlackjack(currentHand)) throw new Error("Current hand is not blackjack or is undefined after taking Even Money.");
 
             const evenMoneyBet = currentHand.bet / 2;
             state = {...state, insurance: evenMoneyBet, bank: state.bank - evenMoneyBet};
@@ -260,7 +272,7 @@ function reduce(state: GameState, action: PlayerAction): Step {
             // Check whether the player busted and settle accordingly
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return {before: state, action: action, after: state, events: EVENTS};
+                throw new Error("Current hand became undefined after hitting.");
             }
             else {               
                 if(handTotal(currentHand) > 21) {
@@ -279,7 +291,7 @@ function reduce(state: GameState, action: PlayerAction): Step {
         case 'double': {
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return {before: state, action: action, after: state, events: EVENTS};
+                throw new Error(`Attempted to double an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
             }
             else {
                 state = hit(state, 'player', EVENTS);
@@ -298,7 +310,7 @@ function reduce(state: GameState, action: PlayerAction): Step {
         case 'split': {
             const currentHand: Hand | undefined = state.hands[state.activeHand];
             if (!currentHand) {
-                return {before: state, action: action, after: state, events: EVENTS};
+                throw new Error(`Attempted to split an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
             }
             state = split(state, EVENTS);
 
@@ -349,24 +361,23 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             // A natural against an ace is offered even money rather than insurance: the same
             // half-bet wager, taken as a certain 1:1 instead of gambling 3:2 against a push
             const startingHand: Hand | undefined = STATE.hands[STATE.activeHand];
-            const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
+            if (!startingHand) throw new Error(`Error offering insurance: hand (${STATE.activeHand + 1}/${STATE.hands.length}) not found.`);
+            const [firstCard, secondCard] = startingHand.cards;
             const upCard = STATE.dealerHand.upcard;
+            if (!firstCard || !secondCard || !upCard) throw new Error("Error offering insurance: the player's two cards or the dealer's upcard is missing.");
 
-            if (startingHand && isBlackjack(startingHand)) {
+            if (isBlackjack(startingHand)) {
                 const pbjAnimation = playerBlackjackAnimation();
                 await paintAnimation(pbjAnimation, 1);
 
                 // Hold the natural on screen and deal the table in underneath it
-                let headline = pbjAnimation.frames[pbjAnimation.frames.length - 1] ?? '';
-                if (firstCard && secondCard && upCard) {
-                    const dAnimation = dealAnimation(firstCard, secondCard, upCard);
-                    const dealUnderHeadline: Animation = {
-                        ...dAnimation,
-                        frames: dAnimation.frames.map((frame) => `${headline}\n\n${frame}`)
-                    };
-                    await paintAnimation(dealUnderHeadline, 0.5);
-                    headline = dealUnderHeadline.frames[dealUnderHeadline.frames.length - 1] ?? headline;
-                }
+                const dAnimation = dealAnimation(firstCard, secondCard, upCard);
+                const dealUnderHeadline: Animation = {
+                    ...dAnimation,
+                    frames: dAnimation.frames.map((frame) => `${lastFrame(pbjAnimation)}\n\n${frame}`)
+                };
+                await paintAnimation(dealUnderHeadline, 0.5);
+                const headline = lastFrame(dealUnderHeadline);
 
                 const OFFER = "Dealer is showing an A: would you like even money? (Y - Yes | N - No)";
                 const response = (await paintedPrompt(`${headline}\n\n${OFFER}`, () => [], 1)).toLowerCase();
@@ -382,14 +393,10 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
 
             // Render the deal animation, then display its last frame over every message
             // player should still see the dealer's ace and their own hand while deciding
-            const deal: Animation | undefined = firstCard && secondCard && upCard ?
-                dealAnimation(firstCard, secondCard, upCard)
-                : undefined;
-            const TABLE = deal?.frames[deal.frames.length - 1] ?? '';
-            const onTable = (message: string): string => TABLE ? `${TABLE}\n\n${message}` : message;
-            if (deal) {
-                await paintAnimation(deal, 0.5);
-            }
+            const deal: Animation = dealAnimation(firstCard, secondCard, upCard);
+            const TABLE = lastFrame(deal);
+            const onTable = (message: string): string => `${TABLE}\n\n${message}`;
+            await paintAnimation(deal, 0.5);
 
             // Offer insurance and take insurance bet -- the offer heads both prompts
             const OFFER = "Dealer is showing an A: would you like to buy insurance? (Y - Yes | N - No)";
@@ -400,7 +407,7 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
                 return { type: 'insurance', amount: 0 };
             }
             else {
-                const max = maxInsurance(STATE.hands[0]?.bet, STATE.bank);
+                const max = maxInsurance(startingHand.bet, STATE.bank);
                 const INSURANCE_SCREEN = onTable(`${OFFER}\n\nEnter your insurance bet (${formatCurrency(1)} - ${formatCurrency(max)})`);
                 const insuranceBet = Number(await paintedPrompt(INSURANCE_SCREEN, (answer) => {
                     const amount = Number(answer);
@@ -419,9 +426,8 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             if (step.action.type == 'bet') {
                 const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
                 const upCard = STATE.dealerHand.upcard;
-                if (firstCard && secondCard && upCard) {
-                    await paintAnimation(dealAnimation(firstCard, secondCard, upCard), 0.5);
-                }
+                if (!firstCard || !secondCard || !upCard) throw new Error("Error dealing the player in: their two cards or the dealer's upcard is missing.");
+                await paintAnimation(dealAnimation(firstCard, secondCard, upCard), 0.5);
             }
 
             // Display insurance loss if taken
@@ -443,21 +449,28 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             }
 
             // Display the updated gameboard and prompt for user move
-            await paint(GAME_BOARD, 0.5);
-            const availableActions = availableMoves(STATE);  
-            const playerAction: Action = await actionPrompt(availableActions);
-            switch(playerAction) {
-                case 'H': return { type: 'hit' };
-                case 'S': return { type: 'stand' };
-                case 'D': return { type: 'double' };
-                case 'P': return { type: 'split' };
-                case 'R': return { type: 'surrender' };
+            const currentHand: Hand | undefined = STATE.hands[STATE.activeHand];
+            if (!currentHand) {
+                throw new Error("Error displaying game board: Current hand not found.");
             }
+            else {
+                await paint(GAME_BOARD, 0.5);
+                const availableActions = legalMoves(currentHand, STATE.rules, STATE);  
+                const playerAction: Action = await actionPrompt(availableActions);
+                switch(playerAction) {
+                    case 'H': return { type: 'hit' };
+                    case 'S': return { type: 'stand' };
+                    case 'D': return { type: 'double' };
+                    case 'P': return { type: 'split' };
+                    case 'R': return { type: 'surrender' };
+                }
+            }           
         }
         case 'settle': {
             // Player took Even Money -> pay it and drop straight back to the menu
             if (step.action.type == 'evenMoney') {
-                const wager = STATE.hands[0]?.bet ?? 0;
+                const wager = STATE.hands[0]?.bet;
+                if (!wager) throw new Error("Error paying even money: the settled hand or its bet is missing.");
                 const HEADLINE = `Accepted even money (+${formatCurrency(wager)})`;
                 await paint(HEADLINE, 2);
                 await paint(`${HEADLINE}\n\nHand is now settled`, 2);
@@ -482,9 +495,8 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             else if (step.action.type == 'bet' && isBlackjack(STATE.dealerHand)) {
                 const [firstCard, secondCard] = STATE.hands[0]?.cards ?? [];
                 const upCard = STATE.dealerHand.upcard;
-                if (firstCard && secondCard && upCard) {
-                    await paintAnimation(dealAnimation(firstCard, secondCard, upCard), 0.5);
-                }
+                if (!firstCard || !secondCard || !upCard) throw new Error("Error dealing the player in: their two cards or the dealer's upcard is missing.");
+                await paintAnimation(dealAnimation(firstCard, secondCard, upCard), 0.5);
             } 
 
             // Display insurance win if taken
@@ -509,7 +521,8 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             await paint(`All hands finished!\n\n${dealerAction}`, 1.5);
 
             const frames = dealerPlayFrames(STATE.dealerHand);
-            const lastFrame = frames[frames.length - 1] ?? '';
+            const finalFrame = frames[frames.length - 1];
+            if (finalFrame == undefined) throw new Error("Error playing out the dealer's hand: no frames to display.");
             const dealerResult = dealerPlayResult(STATE.dealerHand);
 
             // Display the 'dealer plays' header atop all dealer frames
@@ -518,10 +531,10 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
             const dealerPlayAnimation: Animation = {frames: frames.map((frame) => dealerScreen(frame)), timePerFrame: 1.5, duration: frames.length * 1.5};
             await paintAnimation(dealerPlayAnimation);
             if (dealerResult == '') {
-                await paint(dealerScreen(lastFrame, dealerResult), 0.5);
+                await paint(dealerScreen(finalFrame, dealerResult), 0.5);
             }
             else {
-                await paint(dealerScreen(lastFrame, dealerResult), 2);
+                await paint(dealerScreen(finalFrame, dealerResult), 2);
             }
             
             // Display the results screen
@@ -547,7 +560,7 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
         }
     }
 
-    return undefined;
+    throw new Error(`Nothing to render: reached the render step in game phase '${PHASE}'.`);
 }
 
 function hit(state: GameState, to: 'player' | 'dealer', log: GameEvent[]): GameState {
@@ -559,11 +572,11 @@ function hit(state: GameState, to: 'player' | 'dealer', log: GameEvent[]): GameS
     }
 
     const nextCard: Card | undefined = state.shoe.cardsRemaining[0];
-    if (!nextCard) return state;
+    if (!nextCard) throw new Error("Could not get next card from shoe during hit.");
     const shoe: Shoe = {...state.shoe, cardsDealt: state.shoe.cardsDealt + 1, cardsRemaining: state.shoe.cardsRemaining.slice(1)};
 
     if (to == 'player') {
-        if (!state.hands[state.activeHand]) return state;
+        if (!state.hands[state.activeHand]) throw new Error(`Attempted to hit to an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
 
         return {
             ...state,
@@ -598,7 +611,7 @@ function hit(state: GameState, to: 'player' | 'dealer', log: GameEvent[]): GameS
 function split(state: GameState, log: GameEvent[]): GameState {
     const currentHand: Hand | undefined = state.hands[state.activeHand];
     if (!currentHand) {
-        return state;
+        throw new Error(`Current hand became undefined between reduce and split (${state.activeHand + 1}/${state.hands.length}).`);
     }
     const bet = currentHand.bet;
     const [firstCard, secondCard] = cardsFromHand(currentHand);
@@ -631,8 +644,7 @@ function split(state: GameState, log: GameEvent[]): GameState {
         return {...state};
     }
 
-    // Default return on undefined
-    return {...state};
+    throw new Error(`Attempted to split hand (${state.activeHand + 1}/${state.hands.length}) whose bet or one of its two cards is undefined.`);
 }
 
 function activateNextHand(state: GameState, log: GameEvent[]): GameState {
@@ -640,7 +652,7 @@ function activateNextHand(state: GameState, log: GameEvent[]): GameState {
     state = {...state, activeHand: state.activeHand + 1};
     const currentHand: Hand | undefined = state.hands[state.activeHand];
     if (!currentHand) {
-        throw new Error('Attempted to activate non-existing hand');
+        throw new Error(`Attempted to activate an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
     }
     else {
         // If hand is from a non-ace split it needs an extra card
@@ -711,7 +723,7 @@ function settleSurrender(state: GameState, log: GameEvent[]): GameState {
     const bet = state.hands[0]?.bet;
     const currentHand: Hand | undefined = state.hands[0];
     if (!bet || !currentHand) {     
-        throw new Error('Error returning bet to player');
+        throw new Error('Error returning bet to player: current hand or its bet is undefined.');
     }
     else {
         // Game is over -> refresh the shoe if needed
@@ -903,8 +915,8 @@ function totalWagered(hands: readonly Hand[]): number {
     return hands.reduce((total, hand) => total + hand.bet, 0);
 }
 
-function maxInsurance(bet: number | undefined, bank: number): number {
-    if (!bet) return 0;
+function maxInsurance(bet: number, bank: number): number {
+    if (bet <= 0) throw new Error(`Cannot compute max insurance from a bet of ${formatCurrency(bet)}.`);
     return bet / 2 < bank ? bet / 2 : bank;
 }
 // #endregion
@@ -932,17 +944,12 @@ function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
     if (twoCardHand(hand) && !splitAceHand && total < 21 && (!hand.fromSplit || rules.das)) legalActions.push('D');
     if (canSplit(hand, rules, state)) legalActions.push('P');
     if (twoCardHand(hand) && !hand.fromSplit && rules.surrender) legalActions.push('R');
-    return legalActions;
-}
 
-function availableMoves(state: GameState): Action[] {
-    const currentHand: Hand | undefined = state.hands[state.activeHand]; 
-    if (!currentHand) return [];
-    let availableActions: Action[] = legalMoves(currentHand, state.rules, state);
-    if (currentHand.bet > state.bank) {
-        availableActions = availableActions.filter((move) => move != 'D' && move != 'P');
+    // Account for bankroll: don't return an action the user can't legally pay for
+    if (hand.bet > state.bank) {
+        legalActions = legalActions.filter((move) => move != 'D' && move != 'P');
     }
-    return availableActions;   
+    return legalActions;
 }
 // #endregion
 
@@ -982,13 +989,22 @@ async function paint(body: string, duration: number) {
     await sleep(duration);
 }
 
+// The frame an animation finishes on -- what's left on screen once it has played out
+function lastFrame(animation: Animation): string {
+    const frame: string | undefined = animation.frames[animation.frames.length - 1];
+    if (frame == undefined) throw new Error("Attempted to read the last frame of an animation with no frames.");
+    return frame;
+}
+
 async function paintAnimation(animation: Animation, after: number = 0) {
     const FRAME_COUNT = animation.frames.length;
     const TIME_PER_FRAME = animation.timePerFrame;
     const DURATION = animation.duration; 
+    if (FRAME_COUNT == 0) throw new Error("Attempted to paint an animation with no frames.");
 
     for (let i = 0; i < DURATION / TIME_PER_FRAME; i++) {
-        const frame: string = animation.frames[i % FRAME_COUNT] ?? '';
+        const frame: string | undefined = animation.frames[i % FRAME_COUNT];
+        if (frame == undefined) throw new Error(`Animation frame ${i % FRAME_COUNT}/${FRAME_COUNT} is undefined.`);
         await paint(frame, TIME_PER_FRAME);
     }
     if (after > 0) await sleep(after);
@@ -1073,9 +1089,8 @@ function formatShoe(shoe: Shoe, perRow: number): string {
     for (let i = 0; i < Math.floor(LEN / PER_ROW); i++) {              
         for (let j = 0; j < PER_ROW; j++) {
             const nextCard: Card | undefined = shoe.cardsRemaining[i * PER_ROW + j];
-            if (nextCard != undefined) {
-                formattedShoe += `${nextCard.rank}${suitSymbol(nextCard.suit)} `;
-            }
+            if (nextCard == undefined) throw new Error(`Error formatting the shoe: card ${i * PER_ROW + j} of ${LEN} is undefined.`);
+            formattedShoe += `${nextCard.rank}${suitSymbol(nextCard.suit)} `;
         }
         formattedShoe += '\n';
     }
@@ -1083,9 +1098,8 @@ function formatShoe(shoe: Shoe, perRow: number): string {
     // Append partial last row if needed
     for (let i = LEN - (LEN % PER_ROW); i < LEN; i++) {
         const nextCard: Card | undefined = shoe.cardsRemaining[i];
-        if (nextCard != undefined) {
-            formattedShoe += `${nextCard.rank}${suitSymbol(nextCard.suit)} `; 
-        }
+        if (nextCard == undefined) throw new Error(`Error formatting the shoe: card ${i} of ${LEN} is undefined.`);
+        formattedShoe += `${nextCard.rank}${suitSymbol(nextCard.suit)} `; 
         if (i == LEN - 1) formattedShoe += '\n';
     }
 
@@ -1108,9 +1122,10 @@ async function displayAnimation(animation: Animation): Promise<void> {
     const FRAME_COUNT = animation.frames.length;
     const TIME_PER_FRAME = animation.timePerFrame;
     const DURATION = animation.duration;
+    if (FRAME_COUNT == 0) throw new Error("Attempted to display an animation with no frames.");
 
     if (!output.isTTY) {
-        output.write(`${animation.frames[0] ?? ''}\n\n`);
+        output.write(`${animation.frames[0]}\n\n`);
         await sleep(DURATION);
         return;
     }
@@ -1118,7 +1133,8 @@ async function displayAnimation(animation: Animation): Promise<void> {
     // Walk back up by the rows just written: prevents scroll errors
     let previousRows = 0;
     for (let i = 0; i < DURATION / TIME_PER_FRAME; i++) {
-        const frame: string = animation.frames[i % FRAME_COUNT] ?? '';
+        const frame: string | undefined = animation.frames[i % FRAME_COUNT];
+        if (frame == undefined) throw new Error(`Animation frame ${i % FRAME_COUNT}/${FRAME_COUNT} is undefined.`);
         const columns = output.columns || 80;
 
         // Cap the walk at the window height: a frame taller than the window has already had its
@@ -1142,7 +1158,7 @@ function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown',
     const upCard = state.dealerHand.upcard;
     const currentHand = state.hands[state.activeHand];
     if (!upCard || !currentHand) {
-        return '\n   ERROR DISPLAYING GAME BOARD\n';
+        throw new Error("Error displaying game board: current hand or dealer upcard not found.");
     }
     else {
         const h17 = state.rules.h17 ? 'H17' : 'S17';
@@ -1156,7 +1172,7 @@ function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown',
         const betPad = ''.padEnd(13 + (handTotal(currentHand) < 10 ? 1 : 0) + (cardValue(upCard) < 10 ? 1 : 0), ' ');
         const playerCards = cardsFromHand(currentHand).map((card) => formatCard(card)).join(' ');
         const youLine = playerLine ?? `${playerCards}${playerPad}${handTotal(currentHand)}${betPad}bet ${formatCurrency(currentHand.bet)}`;
-        const availableActions = availableMoves(state);
+        const availableActions = legalMoves(currentHand, state.rules, state);
         const actionList = availableActions.map((action) => {
             switch (action) {
                 case 'H': return '[H]it';
@@ -1164,7 +1180,6 @@ function buildGameBoard(state: GameState, actions: 'shown' | 'hidden' = 'shown',
                 case 'D': return '[D]ouble';
                 case 'P': return '[P]split';
                 case 'R': return '[R]surrender';
-                default: return '';
             }
         }).join('  ');
         const actionLine = actions == 'shown' ? `  ${actionList}` : '';
@@ -1198,15 +1213,21 @@ function splitHandFrames(firstCard: Card, secondCard: Card, firstHitCard: Card, 
 }
 
 async function paintMoveFeedback(step: Step) {
+    // Only player moves get feedback -- the boards below are drawn from the hand as it stood
+    // before the move, and the pre-deal state a bet steps off of has no hand or upcard yet
+    const ACTION = step.action;
+    if (ACTION.type == 'bet' || ACTION.type == 'insurance' || ACTION.type == 'evenMoney') return;
+
     const PREV_BOARD = buildGameBoard(step.before, 'hidden');
     const PLAYED_BOARD = buildGameBoard({...step.after, activeHand: step.before.activeHand}, 'hidden');
     const playedHand: Hand | undefined = step.after.hands[step.before.activeHand];
-    if (!playedHand) return;
+    if (!playedHand) throw new Error(`Error displaying move feedback: resulting hand not found ${step.after.activeHand + 1}/${step.after.hands.length}.`);
 
-    switch (step.action.type) {
+    switch (ACTION.type) {
         case 'hit': {
             const drawnCard: Card | undefined = playedHand.cards[playedHand.cards.length - 1];
-            const drawnRank = drawnCard ? drawnCard.rank : '-1';
+            if (!drawnCard) throw new Error("Error displaying move feedback: the played hand has no card after hitting.");
+            const drawnRank = drawnCard.rank;
             const hitResult = handTotal(playedHand) > 21 ? 'Hand busted' : `Hand total is ${handTotal(playedHand)}`;
             const resultPause = hitResult == 'Hand busted' ? 3 : 2;
             await paint(PREV_BOARD, 1);
@@ -1234,7 +1255,8 @@ async function paintMoveFeedback(step: Step) {
                     index == step.before.activeHand ? {...hand, cards: hand.cards.slice(0, -1)} : hand)
             }, 'hidden');
             const drawnCard: Card | undefined = playedHand.cards[playedHand.cards.length - 1];
-            const drawnRank = drawnCard ? drawnCard.rank : '-1';
+            if (!drawnCard) throw new Error("Error displaying move feedback: the played hand has no card after doubling.");
+            const drawnRank = drawnCard.rank;
             const doubleResult = handTotal(playedHand) > 21 ? 'Hand busted' : `Hand finished at ${handTotal(playedHand)}`;
 
             // Split the double animation between not having and having the doubled bet
@@ -1253,47 +1275,46 @@ async function paintMoveFeedback(step: Step) {
             const splitIndex = step.before.activeHand;
             const [firstCard, firstHitCard] = step.after.hands[splitIndex]?.cards ?? [];
             const [secondCard, secondHitCard] = step.after.hands[splitIndex + 1]?.cards ?? [];
-            const lastSplitFrame = SPLIT_ANIMATION.frames[SPLIT_ANIMATION.frames.length - 1] ?? '';
+            const lastSplitFrame = lastFrame(SPLIT_ANIMATION);
             const halfDuration = SPLIT_ANIMATION.duration / 2;
-            if (firstCard && secondCard && firstHitCard) {
-                const splitFrames: readonly string[] = splitHandFrames(firstCard, secondCard, firstHitCard, secondHitCard);
-                let index = 0;
-                for (const frame of splitFrames) {
-                    index++;
-                    const board = buildGameBoard(step.before, 'hidden', frame);
-                    if (index == splitFrames.length) {
-                        await paintAnimation(overBoard(board, {frames: [lastSplitFrame], timePerFrame: halfDuration, duration: halfDuration}));
-                        if (step.after.gamePhase != 'settle') {
-                            // Show "Moving to next hand..." instead of "First hand" on split aces (most hands don't play)
-                            if (firstCard.rank == 'A') {
-                                await paintAnimation(overBoard(board, NEXT_HAND_ANIMATION));
-                            }
-                            else {
-                                await paintAnimation(overBoard(board, SPLIT_HAND_ANIMATION));
-                            }                            
-                        }                       
-                    }      
-                    else {
-                        await paintAnimation(overBoard(board, {...SPLIT_ANIMATION, duration: halfDuration}));
-                    }                              
-                }
+            if (!firstCard || !secondCard || !firstHitCard) {
+                throw new Error(`Error displaying split feedback: hands ${splitIndex + 1} and ${splitIndex + 2} are missing cards.`);
             }
-            else {
-                await paintAnimation(overBoard(PREV_BOARD, SPLIT_HAND_ANIMATION));
-            }   
+
+            const splitFrames: readonly string[] = splitHandFrames(firstCard, secondCard, firstHitCard, secondHitCard);
+            let index = 0;
+            for (const frame of splitFrames) {
+                index++;
+                const board = buildGameBoard(step.before, 'hidden', frame);
+                if (index == splitFrames.length) {
+                    await paintAnimation(overBoard(board, {frames: [lastSplitFrame], timePerFrame: halfDuration, duration: halfDuration}));
+                    if (step.after.gamePhase != 'settle') {
+                        // Show "Moving to next hand..." instead of "First hand" on split aces (most hands don't play)
+                        if (firstCard.rank == 'A') {
+                            await paintAnimation(overBoard(board, NEXT_HAND_ANIMATION));
+                        }
+                        else {
+                            await paintAnimation(overBoard(board, SPLIT_HAND_ANIMATION));
+                        }                            
+                    }                       
+                }      
+                else {
+                    await paintAnimation(overBoard(board, {...SPLIT_ANIMATION, duration: halfDuration}));
+                }                              
+            }
             break;
         }
         case 'surrender': {
             await paintAnimation(overBoard(PREV_BOARD, SURRENDER_ANIMATION));
             break;
         }
-        case 'bet' : case 'insurance': case 'evenMoney': return;
     }
 }
 
 function dealerPlayFrames(hand: DealerHand): string[] {
     const LABEL = 'Dealer:    ';
     const GAP = 4;
+    if (!hand.upcard || !hand.hole) throw new Error("Error playing out the dealer's hand: the upcard or the hole card is missing.");
     const revealed = [formatCard(hand.upcard), formatCard(hand.hole)];
 
     // Pad every frame out to the final width so the total holds one column as the cards land
