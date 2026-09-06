@@ -171,3 +171,14 @@ export const SURRENDER_ANIMATION: Animation = {
      timePerFrame: 0.15,
      duration: 3
 };
+
+export const GAME_OVER_ANIMATION: Animation = {
+     frames: [
+          "Better luck next time",
+          "Better luck next time.",
+          "Better luck next time..",
+          "Better luck next time...",
+     ],
+     timePerFrame: 0.75,
+     duration: 3
+};

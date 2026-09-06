@@ -1,15 +1,16 @@
 import type {
-    Rank, Suit, Card, Shoe, RuleSet, Casino, DealerHand, RunningCount, Hand, Action, PlayerAction,
-    GameState, GameEvent, Step,
+    Rank, Suit, Card, Shoe, RuleSet, DealerHand, Hand, Action, PlayerAction, GameState, 
+    GameEvent, Step,
 } from '@doubledeck/blackjack';
 
-import { RANKS, SUITS, SUIT_SYMBOLS, PLAYING_CARDS } from '@doubledeck/blackjack';
+import { SUIT_SYMBOLS, PLAYING_CARDS } from '@doubledeck/blackjack';
 
 import type { Animation } from './blackjack-animations.ts';
 
 import { 
     GREETING_ANIMATION, RESHUFFLE_ANIMATION, formatCard, dealAnimation, playerBlackjackAnimation, 
-    DOUBLE_ANIMATION, SPLIT_ANIMATION, SPLIT_HAND_ANIMATION, NEXT_HAND_ANIMATION, SURRENDER_ANIMATION 
+    DOUBLE_ANIMATION, SPLIT_ANIMATION, SPLIT_HAND_ANIMATION, NEXT_HAND_ANIMATION, SURRENDER_ANIMATION,
+    GAME_OVER_ANIMATION, 
 } from './blackjack-animations.ts';
 
 import * as readline from 'node:readline/promises';
@@ -140,7 +141,16 @@ async function main() {
                 inAltScreen = false;
                 await sleep(0.5);
             }    
-            gameState = {...gameState, gamePhase: 'bet'};         
+            gameState = {...gameState, gamePhase: 'bet'};  
+            
+            // Check and display message for Game Over
+            if (gameState.bank <= 0) {
+                await sleep(0.5);
+                printSpaced("You've run out of bank!");
+                await sleep(2);
+                await displayAnimation(GAME_OVER_ANIMATION);
+                break;
+            }
         }
 
         else if (userResponse == 'q' || userResponse == 'quit') {
@@ -831,14 +841,6 @@ function refreshShoe(state: GameState, inPlay: readonly Card[] = []): GameState 
     return {...state, shoe: freshShoe};
 }
 
-function shoeSize(shoe: Shoe): number {
-    return shoe.decks * 52;
-}
-
-function decksRemaining(shoe: Shoe): number {
-    return Math.max(0.25, (shoeSize(shoe) - shoe.cardsDealt) / 52);
-}
-
 function jitterFromPenMode(mode: string): number {
     return mode === 'notch' ? 0 : mode === 'cutcard' ? 0.025 : 0.075;
 }
@@ -899,7 +901,6 @@ function canSplit(hand: Hand, rules: RuleSet, state: GameState): boolean {
 }
 
 function isBlackjack(hand: Hand | DealerHand): boolean {
-    const cards: readonly Card[] = cardsFromHand(hand);
     if ('bet' in hand) {
         const hasAce = hand.cards.some((card) => card.rank === 'A');
         return !hand.fromSplit && twoCardHand(hand) && hasAce && handTotal(hand) == 21;
@@ -911,10 +912,6 @@ function isBlackjack(hand: Hand | DealerHand): boolean {
 // #endregion
 
 // #region Accounting
-function totalWagered(hands: readonly Hand[]): number {
-    return hands.reduce((total, hand) => total + hand.bet, 0);
-}
-
 function maxInsurance(bet: number, bank: number): number {
     if (bet <= 0) throw new Error(`Cannot compute max insurance from a bet of ${formatCurrency(bet)}.`);
     return bet / 2 < bank ? bet / 2 : bank;
@@ -922,18 +919,6 @@ function maxInsurance(bet: number, bank: number): number {
 // #endregion
 
 // #region Strategy
-function between(num: number, low: number, high: number): boolean {
-    return num >= low && num <= high;
-}
-
-function situationKey(playerHand: Hand, upcard: Card): string {
-    const [firstCard, secondCard] = playerHand.cards;
-    if (playerHand.cards.length === 2 && firstCard && secondCard && cardValue(firstCard) === cardValue(secondCard)) {
-        return `pair${cardValue(firstCard)}v${cardValue(upcard)}`;
-    }
-    return `${hardOrSoft(playerHand)}${handTotal(playerHand)}v${cardValue(upcard)}`;
-}
-
 function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
     const total = handTotal(hand);
     let legalActions: Action[] = [];
@@ -1033,11 +1018,11 @@ async function paintedPrompt(
     }
 }
 
-const INVALID_MOVE_MESSAGE = "Invalid selection! Please select a legal move";
-const INVALID_MOVE_DURATION = 2;
-
 // Re-prompts until the move is legal, wiping the rejected input and the warning in place
 async function actionPrompt(legalActions: readonly Action[]): Promise<Action> {
+    const INVALID_MOVE_MESSAGE = "Invalid selection! Please select a legal move";
+    const INVALID_MOVE_DURATION = 2;
+
     while (true) {
         const reader: readline.Interface = readline.createInterface(input, output);
         output.write('\x1b[?25h');

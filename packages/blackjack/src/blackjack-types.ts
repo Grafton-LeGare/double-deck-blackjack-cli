@@ -1,6 +1,6 @@
 // Cards
-export const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'] as const;
-export const SUITS = ['S', 'C', 'H', 'D'] as const;
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'] as const;
+const SUITS = ['S', 'C', 'H', 'D'] as const;
 
 export type Rank = typeof RANKS[number];
 export type Suit = typeof SUITS[number];
@@ -42,7 +42,6 @@ export const PLAYING_CARDS: readonly Card[] = [
 // Dealer
 export type Shoe = {
     readonly decks: number;
-    readonly seed?: number;
     readonly cutCardPosition: number;
     readonly cardsDealt: number;
     readonly cardsRemaining: readonly Card[]
@@ -60,20 +59,6 @@ export type RuleSet = {
     penMode: 'notch' | 'cutcard' | 'dealer'
 };
 
-export type Casino = {
-    id: string;
-    name: string;
-    area: 'locals' | 'downtown' | 'strip';
-    rules: RuleSet;
-    minBet: number;
-    maxBet: number;
-    tables: number;
-    deal: 'pitch' | 'shoe';
-    edgeOffTop: number;
-    note: string;
-    source: { survey: string; asOf: string }
-};
-
 export type DealerHand = {
     readonly upcard?: Card;
     readonly hole?: Card;
@@ -84,11 +69,6 @@ export type DealerHand = {
 
 
 // Player
-export type RunningCount = {
-    readonly system: 'hilo';
-    readonly count: number
-};
-
 export type Hand = {
     readonly cards: readonly Card[];
     readonly bet: number;
@@ -116,7 +96,6 @@ export type GameEvent =
 
 export type GameState = {
     readonly rules: RuleSet;
-    readonly casino?: Casino;
     readonly shoe: Shoe;
     readonly hands: readonly Hand[];
     readonly dealerHand: DealerHand;
