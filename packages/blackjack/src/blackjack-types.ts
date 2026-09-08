@@ -1,6 +1,6 @@
 // Cards
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'] as const;
-const SUITS = ['S', 'C', 'H', 'D'] as const;
+export const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'] as const;
+export const SUITS = ['S', 'C', 'H', 'D'] as const;
 
 export type Rank = typeof RANKS[number];
 export type Suit = typeof SUITS[number];
