@@ -1,9 +1,11 @@
 import type {
-    Rank, Suit, Card, Shoe, RuleSet, DealerHand, Hand, Action, PlayerAction, GameState, 
-    GameEvent, Step,
+    Card, Shoe, RuleSet, DealerHand, Hand, Action, PlayerAction, GameState, Step,
 } from '@doubledeck/blackjack';
 
-import { SUIT_SYMBOLS, PLAYING_CARDS } from '@doubledeck/blackjack';
+import {
+    reduce, combineDecks, shuffleDecks, getCutCardPosition, refreshShoe, handTotal, isBlackjack, 
+    legalMoves, maxInsurance, suitSymbol, cardsFromHand, cardValue,  
+} from '@doubledeck/blackjack';
 
 import type { Animation } from './blackjack-animations.ts';
 
@@ -14,6 +16,7 @@ import {
 } from './blackjack-animations.ts';
 
 import * as readline from 'node:readline/promises';
+import * as linereader from 'node:readline';
 import process, { stdin as input, stdout as output } from 'node:process';
 
 // DA RULES
@@ -22,7 +25,7 @@ const defaultGameRules: RuleSet = {
     h17: true,
     rsa: true,
     das: true,
-    maxHands: 4,
+    maxHands: 6,
     surrender: false,
     blackjackPays: 1.5,
     penetration: 0.75,
@@ -30,41 +33,9 @@ const defaultGameRules: RuleSet = {
 };
 let gameRules: RuleSet = defaultGameRules;
 
-// Build initial shoe
-const combinedDeck: Card[] = combineDecks(gameRules.decks);
-let shuffledDeck: Card[] = shuffleDecks(combinedDeck);
-
-let shoe: Shoe = {
-    decks: gameRules.decks,
-    cutCardPosition: getCutCardPosition(gameRules),
-    cardsDealt: 0,
-    cardsRemaining: shuffledDeck
-};
-
-// Filler for the test shoe below -- cycles non-ace ranks/suits
-const TEST_SHOE_FILLER: Card[] = Array.from({ length: 40 }, (_, i) => {
-    const fillerRanks: Rank[] = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
-    const fillerSuits: Suit[] = ['S', 'C', 'H', 'D'];
-    return {
-        rank: fillerRanks[i % fillerRanks.length]!,
-        suit: fillerSuits[Math.floor(i / fillerRanks.length) % fillerSuits.length]!
-    };
-});
-
-// Test shoe: Swap in for `shoe` above to manually exercise specific flows.
-const testShoe: Shoe = {
-    decks: gameRules.decks,
-    cutCardPosition: 16, // getCutCardPosition(gameRules),
-    cardsDealt: 0,
-    cardsRemaining: [
-        { rank: 'T', suit: 'S' }, // player card 1
-        { rank: '3', suit: 'S' }, // dealer upcard
-        { rank: 'K', suit: 'C' }, // player card 2
-        { rank: 'J', suit: 'H' }, // dealer hole
-        { rank: '9', suit: 'D' }, // split card 1
-        ...TEST_SHOE_FILLER
-    ]
-};
+// Animation play speed
+const SPEED_OPTIONS = { slow: 2, normal: 1, fast: (1/3), off: 0 };
+let SPEED: number = SPEED_OPTIONS.normal;
 
 // Reusable currency formatting (No $25.66521 amounts)
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -80,19 +51,9 @@ let inAltScreen: boolean = false;
 
 async function main() {
     // Initialize Game/State
-    const STARTING_BANKROLL = 10000;
+    const STARTING_BANKROLL = 10000;   
+    let gameState: GameState = newGame(gameRules, STARTING_BANKROLL);
     let firstHand: boolean = true;
-
-    let gameState: GameState = {
-        rules: gameRules,
-        shoe: shoe,
-        hands: [],
-        dealerHand: { drawn: [], holeRevealed: false, playedOut: false },
-        activeHand: 0,
-        insurance: 0,
-        gamePhase: 'bet',
-        bank: STARTING_BANKROLL
-    };
 
     // This program hides the cursor by default -> see process.on for giving it back
     output.write('\x1b[?25l');
@@ -106,7 +67,7 @@ async function main() {
         // Pre-game Menu
         printSpaced(`Your current bankroll is ${formatCurrency(gameState.bank)}`);
         await sleep(1);
-        printSpaced("Would you like to play a new hand? (P - Play | Q - Quit | D - Display shoe | R - Reshuffle)");
+        printSpaced("Would you like to play a new hand? (P - Play | Q - Quit | D - Display shoe | R - Reshuffle | S - Settings)");
         await sleep(0.5);
 
         userResponse = (await arrowedPrompt()).toLowerCase();
@@ -173,6 +134,20 @@ async function main() {
             await sleep(0.5);
         }
 
+        else if (userResponse == 's' || userResponse == 'settings') {
+            // Switch to alt-screen
+            output.write('\x1b[?1049h');
+            inAltScreen = true;
+            try {
+                gameRules = await settingsMenu(gameRules);
+            }
+            finally {
+                output.write('\x1b[?1049l');
+                inAltScreen = false;
+                await sleep(0.5);
+            }
+        }
+
         else {
             // Redirect for invalid input
             printSpaced("Invalid response");
@@ -189,165 +164,15 @@ process.on('exit', () => {
         output.write('\x1b[?1049l');
         inAltScreen = false;
     }    
+    if (input.isRaw) {
+        input.setRawMode(false);
+    }
     output.write('\x1b[?25h');
 });
 process.on('SIGINT', () => process.exit(130));
 
 main().catch((err) => { console.error(err); process.exit(1) });
 
-function reduce(state: GameState, action: PlayerAction): Step {
-    // ONLY CALL THIS FUNCTION WHEN THE PLAYER HITS ENTER
-    const PREV_STATE = state;
-    const EVENTS: GameEvent[] = [];
-
-    switch (action.type) {
-        case 'bet': {
-            // Finish Game/State setup with amount wagered. Also functions as a reset
-            state = {
-                ...state, 
-                bank: state.bank - action.amount,
-                hands: [{
-                    cards: [],
-                    bet: action.amount,
-                    fromSplit: false,
-                    result: 'pending'
-                }],
-                dealerHand: {
-                    drawn: [],
-                    holeRevealed: false,
-                    playedOut: false
-                },
-                activeHand: 0,
-                insurance: 0
-            };
-
-            // The player has bet -> deal out cards and check for player blackjack
-            state = hit(hit(hit(hit(state, 'player', EVENTS), 'dealer', EVENTS), 'player', EVENTS), 'dealer', EVENTS);
-
-            const startingHand: Hand | undefined = state.hands[state.activeHand];
-            if (!startingHand) throw new Error("Starting hand is undefined after the initial deal.");
-            const upcard: Card | undefined = state.dealerHand.upcard;
-            if (!upcard) throw new Error("Dealer upcard is undefined after the initial deal.");
-            if (isBlackjack(startingHand)) {
-                if (upcard.rank === 'A') {
-                    // Offer even money on Blackjack vs A
-                    return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
-                }
-                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-            }
-
-            // Offer insurance on dealer ace
-            if (upcard.rank === 'A' && state.bank >= 1) {
-                // Transition to insurance offer
-                return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'insurance'}, events: EVENTS};
-            }
-
-            // Check for dealer blackjack
-            if (isBlackjack(state.dealerHand)) {
-                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-            }
-
-            // Transition to gameplay
-            return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'play'}, events: EVENTS};
-        }
-        case 'insurance': {
-            // Record and deduct insurance bet
-            state = {...state, insurance: action.amount, bank: state.bank - action.amount};
-
-            // Dealer checks for blackjack
-            // player blackjack vs A also goes through this flow
-            const startingHand: Hand | undefined = state.hands[state.activeHand];
-            if (isBlackjack(state.dealerHand) || (startingHand && isBlackjack(startingHand))) {
-                return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-            }
-            else {
-                return {before: PREV_STATE, action: action, after: {...state, gamePhase: 'play'}, events: EVENTS};
-            }
-        }
-        case 'evenMoney': {
-            // Even money IS the insurance bet a natural would have to make to lock in 1:1 --
-            // half the wager, paid 2:1 on a dealer natural, lost otherwise. Settling it as that
-            // bet lands on +1x the wager down both branches, and keeps one payout path.
-            const currentHand: Hand | undefined = state.hands[state.activeHand];
-            if (!currentHand || !isBlackjack(currentHand)) throw new Error("Current hand is not blackjack or is undefined after taking Even Money.");
-
-            const evenMoneyBet = currentHand.bet / 2;
-            state = {...state, insurance: evenMoneyBet, bank: state.bank - evenMoneyBet};
-
-            return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-        }
-        case 'hit': {
-            state = hit(state, 'player', EVENTS);
-
-            // Check whether the player busted and settle accordingly
-            const currentHand: Hand | undefined = state.hands[state.activeHand];
-            if (!currentHand) {
-                throw new Error("Current hand became undefined after hitting.");
-            }
-            else {               
-                if(handTotal(currentHand) > 21) {
-                    if(isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-                    return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
-                }
-                else {
-                    return {before: PREV_STATE, action: action, after: {...state}, events: EVENTS};
-                }
-            }
-        }
-        case 'stand': {
-            if (isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-            return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
-        }
-        case 'double': {
-            const currentHand: Hand | undefined = state.hands[state.activeHand];
-            if (!currentHand) {
-                throw new Error(`Attempted to double an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
-            }
-            else {
-                state = hit(state, 'player', EVENTS);
-                state = {
-                    ...state,
-                    hands: state.hands.map((hand, index) => index == state.activeHand ? 
-                        { ...hand, bet: hand.bet * 2}
-                        : hand),
-                    bank: state.bank - currentHand.bet
-                }
-
-                if (isLastHand(state)) return {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS};
-                return {before: PREV_STATE, action: action, after: activateNextHand(state, EVENTS), events: EVENTS};
-            }    
-        }
-        case 'split': {
-            const currentHand: Hand | undefined = state.hands[state.activeHand];
-            if (!currentHand) {
-                throw new Error(`Attempted to split an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
-            }
-            state = split(state, EVENTS);
-
-            // Aces were split -> game may need to be settled now
-            if (currentHand.cards[0]?.rank == 'A') {
-                let nextHand = -1;
-                let index: number = 0;
-                for (const hand of state.hands) {
-                    if (hand.cards[0]?.rank == 'A' && hand.cards[1]?.rank == 'A') {
-                        nextHand = index;
-                        break;
-                    }
-                    index++;
-                }
-                return nextHand == -1 ?
-                    {before: PREV_STATE, action: action, after: settleHands(state, EVENTS), events: EVENTS}
-                    : {before: PREV_STATE, action: action, after: {...state, activeHand: nextHand}, events: EVENTS};
-            }
-            else {
-                return {before: PREV_STATE, action: action, after: {...state}, events: EVENTS};
-            }
-        }
-        case 'surrender': {
-            return {before: PREV_STATE, action: action, after: settleSurrender(state, EVENTS), events: EVENTS};
-        }
-    }
-}
 
 async function render(step: Step): Promise<PlayerAction | undefined> {
     const STATE = step.after;
@@ -573,193 +398,28 @@ async function render(step: Step): Promise<PlayerAction | undefined> {
     throw new Error(`Nothing to render: reached the render step in game phase '${PHASE}'.`);
 }
 
-function hit(state: GameState, to: 'player' | 'dealer', log: GameEvent[]): GameState {
-    // Nothing left to deal -> refresh the shoe around the cards still in play
-    if (state.shoe.cardsRemaining.length == 0) {
-        const inPlay: Card[] = [...state.hands.flatMap((hand) => cardsFromHand(hand)), ...cardsFromHand(state.dealerHand)];
-        state = refreshShoe(state, inPlay);
-        log.push({type: 'reshuffle', cause: 'empty'});
-    }
+function newGame(rules: RuleSet, bankroll: number): GameState {
+    // Build initial shoe
+    const combinedDeck: Card[] = combineDecks(rules.decks);
+    const shuffledDeck: Card[] = shuffleDecks(combinedDeck);
 
-    const nextCard: Card | undefined = state.shoe.cardsRemaining[0];
-    if (!nextCard) throw new Error("Could not get next card from shoe during hit.");
-    const shoe: Shoe = {...state.shoe, cardsDealt: state.shoe.cardsDealt + 1, cardsRemaining: state.shoe.cardsRemaining.slice(1)};
+    const shoe: Shoe = {
+        decks: rules.decks,
+        cutCardPosition: getCutCardPosition(rules),
+        cardsDealt: 0,
+        cardsRemaining: shuffledDeck
+    };
 
-    if (to == 'player') {
-        if (!state.hands[state.activeHand]) throw new Error(`Attempted to hit to an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
-
-        return {
-            ...state,
-            shoe: shoe,
-            hands: state.hands.map((hand, index) =>
-                index == state.activeHand ?
-                    {...hand, cards: [...hand.cards, nextCard]}
-                    : hand)
-        };
-    }
-    else {
-        const dealerHand: DealerHand = state.dealerHand;
-        let resultingHand: DealerHand;
-        if (!dealerHand.upcard) {
-            resultingHand = {...dealerHand, upcard: nextCard};
-        }
-        else if (!dealerHand.hole) {
-            resultingHand = {...dealerHand, hole: nextCard};
-        }
-        else {
-            resultingHand = {...dealerHand, drawn: [...dealerHand.drawn, nextCard]};
-        }
-
-        return {
-            ...state,
-            shoe: shoe,
-            dealerHand: resultingHand
-        };
-    }
-}
-
-function split(state: GameState, log: GameEvent[]): GameState {
-    const currentHand: Hand | undefined = state.hands[state.activeHand];
-    if (!currentHand) {
-        throw new Error(`Current hand became undefined between reduce and split (${state.activeHand + 1}/${state.hands.length}).`);
-    }
-    const bet = currentHand.bet;
-    const [firstCard, secondCard] = cardsFromHand(currentHand);
-    if (bet && firstCard && secondCard) {
-        state = {
-            ...state,
-            hands: state.hands.toSpliced(state.activeHand, 1, 
-                {
-                    cards: [firstCard],
-                    fromSplit: true,
-                    bet: bet,
-                    result: 'pending'
-                },
-                {
-                    cards: [secondCard],
-                    fromSplit: true,
-                    bet: bet,
-                    result: 'pending'
-                }
-            ),
-            bank: state.bank - bet
-        };
-        state = hit(state, 'player', log);
-
-        // Split aces are both hit -> Hit next hand as well then return activeHand to normal
-        if (currentHand.cards[0]?.rank == 'A') {
-            state = hit({...state, activeHand: state.activeHand + 1}, 'player', log);
-            state = {...state, activeHand: state.activeHand - 1};
-        }
-        return {...state};
-    }
-
-    throw new Error(`Attempted to split hand (${state.activeHand + 1}/${state.hands.length}) whose bet or one of its two cards is undefined.`);
-}
-
-function activateNextHand(state: GameState, log: GameEvent[]): GameState {
-    // Playing right to left activeHand + 1 is always next
-    state = {...state, activeHand: state.activeHand + 1};
-    const currentHand: Hand | undefined = state.hands[state.activeHand];
-    if (!currentHand) {
-        throw new Error(`Attempted to activate an undefined hand (${state.activeHand + 1}/${state.hands.length}).`);
-    }
-    else {
-        // If hand is from a non-ace split it needs an extra card
-        return currentHand.cards.length < 2 ? hit(state, 'player', log) : {...state};
-    }
-}
-
-function settleHands(state: GameState, log: GameEvent[]): GameState {
-    // Transition to settle and reveal the dealer's hole 
-    state = {...state, dealerHand: {...state.dealerHand, holeRevealed: true}, gamePhase: 'settle'};
-
-    // Dealer play - yep this is it
-    // Don't play if player fully busted or has natural blackjack
-    const naturalBlackjack = state.hands.some(isBlackjack);
-    if (state.hands.some((hand) => handTotal(hand) <= 21) && !naturalBlackjack && !isBlackjack(state.dealerHand)) {
-        state = {...state, dealerHand: {...state.dealerHand, playedOut: true}};
-        while (handTotal(state.dealerHand) < 17 ||
-            (handTotal(state.dealerHand) == 17 && hardOrSoft(state.dealerHand) == 'soft' && state.rules.h17)) 
-        {
-            state = hit(state, 'dealer', log);
-        }
-    }
-    const dealerBlackjack = isBlackjack(state.dealerHand);
-
-    // Payout insurance on dealer blackjack - can be added regardless of win/loss/insurance because default is 0
-    if (dealerBlackjack) state = {...state, bank: state.bank + state.insurance * 3};
-    
-    // Compare each hand to dealer -> Payout chips and assign result
-    let totalPayout: number = 0;
-    const settledHands: Hand[] = state.hands.map((hand) => {
-        if (dealerBlackjack) {
-            if (!isBlackjack(hand)) {
-                return {...hand, result: 'loss'};
-            }
-            else {
-                totalPayout += hand.bet;
-                return {...hand, result: 'push'};
-            }
-        }
-        else {
-            if (handTotal(hand) > 21 ) {
-                return {...hand, result: 'loss'};
-            }
-            else if (handTotal(hand) > handTotal(state.dealerHand) || handTotal(state.dealerHand) > 21) {
-                totalPayout += isBlackjack(hand) ? hand.bet * (1 + state.rules.blackjackPays) : hand.bet * 2;
-                return {...hand, result: 'win'};
-            }
-            else if (handTotal(hand) < handTotal(state.dealerHand)) {
-                return {...hand, result: 'loss'};
-            }
-            else {
-                totalPayout += hand.bet;
-                return {...hand, result: 'push'};
-            }
-        }
-    });
-
-    // Game is over -> refresh the shoe if needed
-    if (needsRefresh(state.shoe)) {
-        state = refreshShoe(state);
-        log.push({type: 'reshuffle', cause: 'cutcard'});
-    }
-
-    return {...state, hands: settledHands, bank: state.bank + totalPayout};
-}
-
-function settleSurrender(state: GameState, log: GameEvent[]): GameState {
-    const bet = state.hands[0]?.bet;
-    const currentHand: Hand | undefined = state.hands[0];
-    if (!bet || !currentHand) {     
-        throw new Error('Error returning bet to player: current hand or its bet is undefined.');
-    }
-    else {
-        // Game is over -> refresh the shoe if needed
-        if (needsRefresh(state.shoe)) {
-            state = refreshShoe(state);
-            log.push({type: 'reshuffle', cause: 'cutcard'});
-        }
-
-        // Return 1/2 bet, switch phase to settle, record surrender, reveal hole card
-        return {
-            ...state, 
-            hands: [{
-                cards: currentHand.cards,
-                fromSplit: currentHand.fromSplit,
-                bet: currentHand.bet,
-                result: 'surrender'
-            }],
-            dealerHand: { ...state.dealerHand, holeRevealed: true},
-            gamePhase: 'settle', 
-            bank: state.bank + bet / 2
-        };
-    }
-}
-
-function isLastHand(state: GameState): boolean {
-    return state.activeHand == state.hands.length - 1;
+    return {
+        rules: rules,
+        shoe: shoe,
+        hands: [],
+        dealerHand: { drawn: [], holeRevealed: false, playedOut: false },
+        activeHand: 0,
+        insurance: 0,
+        gamePhase: 'bet',
+        bank: bankroll
+    };
 }
 
 function playerNet(state: GameState): number {
@@ -783,160 +443,6 @@ function playerNet(state: GameState): number {
 
     return net;
 }
-
-/*  ----- Utility functions ----- */
-
-// #region Shoe
-function combineDecks(numDecks: number): Card[] {
-    return PLAYING_CARDS.flatMap((card) => Array.from({ length: numDecks }, () => card));
-}
-
-function shuffleDecks(deck: readonly Card[]): Card[] {
-    const shuffled: Card[] = [...deck];
-    const n = shuffled.length;
-    for (let i = n - 1; i > 0; i--) {
-        let strike: number = Math.floor(Math.random() * (i + 1));
-        [shuffled[strike], shuffled[i]] = [shuffled[i]!, shuffled[strike]!];
-    }
-    return shuffled;
-}
-
-function getCutCardPosition(rules: RuleSet): number {
-    const defaultPen = rules.penetration;
-    const jitter = jitterFromPenMode(rules.penMode);
-    let adjustedPen: number;
-    if (rules.penMode == 'notch') {
-        adjustedPen = defaultPen;
-    }
-    else {
-        // Minimum 0.4, maximum 0.88, variance -jitter : +jitter
-        adjustedPen = Math.max(0.40, Math.min(0.88, defaultPen + (Math.random() * 2 - 1) * jitter));      
-    }
-    return Math.floor(adjustedPen * (rules.decks * 52 - 1)); 
-}
-
-function needsRefresh(shoe: Shoe): boolean {
-    return shoe.cardsDealt > shoe.cutCardPosition;
-}
-
-function refreshShoe(state: GameState, inPlay: readonly Card[] = []): GameState {
-    const combinedDeck: Card[] = combineDecks(state.rules.decks);
-
-    // Cards still on the table haven't reached the discard tray -- pull one copy of each out of
-    // the fresh shoe so a hand in progress can never be dealt a card it is already holding
-    const undealt: Card[] = [...combinedDeck];
-    for (const card of inPlay) {
-        const index = undealt.findIndex((spare) => spare.rank === card.rank && spare.suit === card.suit);
-        if (index >= 0) undealt.splice(index, 1);
-    }
-
-    const shuffledDeck: Card[] = shuffleDecks(undealt);
-    const freshShoe: Shoe = {
-        decks: state.rules.decks,
-        cutCardPosition: getCutCardPosition(state.rules),
-        // Held cards count as dealt -- keeps shoeSize - cardsDealt equal to what's left to draw
-        cardsDealt: inPlay.length,
-        cardsRemaining: shuffledDeck
-    };
-    return {...state, shoe: freshShoe};
-}
-
-function jitterFromPenMode(mode: string): number {
-    return mode === 'notch' ? 0 : mode === 'cutcard' ? 0.025 : 0.075;
-}
-// #endregion
-
-// #region Cards
-function suitSymbol(suit: Suit) {
-    return SUIT_SYMBOLS[suit];
-}
-
-function cardValue(card: Card): number {
-    return card.rank === 'A' ? 11 : ['T', 'J', 'Q', 'K'].includes(card.rank) ? 10 : +card.rank;
-}
-
-function cardsFromHand(hand: Hand | DealerHand): readonly Card[] {
-    return 'cards' in hand
-        ? hand.cards
-        : [hand.upcard, hand.hole, ...hand.drawn].filter((card): card is Card => card != undefined);
-}
-
-function handTotal(hand: Hand | DealerHand): number {
-    const cards: readonly Card[] = cardsFromHand(hand);
-
-    let total = 0, numAces = 0;
-    for (const card of cards) {
-        total += cardValue(card);
-        if (card.rank === 'A') numAces++;
-    }
-    while (total > 21 && numAces > 0) {
-        total -= 10;
-        numAces--;
-    }
-
-    return total;
-}
-
-function twoCardHand(hand: Hand): boolean {
-    return hand.cards.length === 2;
-}
-
-function hardOrSoft(hand: Hand | DealerHand): 'hard' | 'soft' {
-    const cards: readonly Card[] = cardsFromHand(hand);
-
-    // Total with every ace counted as 1; the hand is soft if one can be 11 instead
-    const minTotal = cards.reduce((total, card) => total + (card.rank === 'A' ? 1 : cardValue(card)), 0);
-    return cards.some((card) => card.rank === 'A') && minTotal + 10 <= 21 ? 'soft' : 'hard';
-}
-
-function canSplit(hand: Hand, rules: RuleSet, state: GameState): boolean {
-    if (!twoCardHand(hand)) return false;
-    const [firstCard, secondCard] = hand.cards;
-    if (firstCard && secondCard && cardValue(firstCard) === cardValue(secondCard)) {
-        if (state.hands.length < rules.maxHands && (firstCard.rank != 'A' || !hand.fromSplit || rules.rsa)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function isBlackjack(hand: Hand | DealerHand): boolean {
-    if ('bet' in hand) {
-        const hasAce = hand.cards.some((card) => card.rank === 'A');
-        return !hand.fromSplit && twoCardHand(hand) && hasAce && handTotal(hand) == 21;
-    }
-    else {
-        return hand.drawn.length == 0 && handTotal(hand) == 21 && (hand.upcard?.rank === 'A' || hand.hole?.rank === 'A');
-    }
-}
-// #endregion
-
-// #region Accounting
-function maxInsurance(bet: number, bank: number): number {
-    if (bet <= 0) throw new Error(`Cannot compute max insurance from a bet of ${formatCurrency(bet)}.`);
-    return bet / 2 < bank ? bet / 2 : bank;
-}
-// #endregion
-
-// #region Strategy
-function legalMoves(hand: Hand, rules: RuleSet, state: GameState): Action[] {
-    const total = handTotal(hand);
-    let legalActions: Action[] = [];
-    const splitAceHand = hand.fromSplit && hand.cards[0]?.rank === 'A';
-    if (total < 21 && !splitAceHand) legalActions.push('H');
-    // Standing is always legal
-    legalActions.push('S');
-    if (twoCardHand(hand) && !splitAceHand && total < 21 && (!hand.fromSplit || rules.das)) legalActions.push('D');
-    if (canSplit(hand, rules, state)) legalActions.push('P');
-    if (twoCardHand(hand) && !hand.fromSplit && rules.surrender) legalActions.push('R');
-
-    // Account for bankroll: don't return an action the user can't legally pay for
-    if (hand.bet > state.bank) {
-        legalActions = legalActions.filter((move) => move != 'D' && move != 'P');
-    }
-    return legalActions;
-}
-// #endregion
 
 // #region Input/Output
 function printSpaced(msg: string) {
@@ -1015,6 +521,162 @@ async function paintedPrompt(
             screen += `\n\n${complaint}`;
             await paint(screen, index == complaints.length - 1 ? 2 : 1);
         }
+    }
+}
+
+async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
+    if (!input.isTTY) throw new Error("Error accessing settings menu: Input is not a TTY.");
+
+    // Every rule reads back as the option it is currently set to
+    const yesNo = (flag: boolean): string => flag ? 'Yes' : 'No';
+
+    // Penetration is carried as a fraction of the shoe, so the closest offered slice names it
+    const PENETRATIONS = [[0.75, '3/4'], [2 / 3, '2/3'], [0.5, '1/2']] as const;
+    const namePenetration = (fraction: number): string => PENETRATIONS
+        .reduce((closest, slice) => Math.abs(slice[0] - fraction) < Math.abs(closest[0] - fraction) ? slice : closest)[1];
+
+    const PEN_MODE_NAMES: Record<RuleSet['penMode'], string> = {
+        notch: 'Notch', cutcard: 'Cutcard', dealer: 'Dealer choice'
+    };
+
+    const nameSpeed = (speed: number): string =>
+          speed == SPEED_OPTIONS.slow ? 'Slow'
+        : speed == SPEED_OPTIONS.fast ? 'Fast'
+        : speed == SPEED_OPTIONS.off  ? 'OFF'
+        : 'Normal';
+
+    // The table is rebuilt from the draft on every keypress, so a cancel can walk away from
+    // the edits and a save can hand them back whole
+    let draftRules: RuleSet = { ...currentRules };
+    let draftSpeed: number = SPEED;
+
+    // One row per rule, in the order the player reads them, plus the animation speed
+    const rowsFor = (rules: RuleSet, speed: number): readonly (readonly [string, string])[] => [
+        ['Number of decks',     `[${rules.decks}]`],
+        ['Hit on soft 17',      yesNo(rules.h17)],
+        ['Re-split split aces', yesNo(rules.rsa)],
+        ['Double after split',  yesNo(rules.das)],
+        ['Max hands',           `[${rules.maxHands}]`],
+        ['Surrender allowed',   yesNo(rules.surrender)],
+        ['Blackjack payout',    rules.blackjackPays == 1.5 ? '3:2' : '6:5'],
+        ['Shoe penetration',    namePenetration(rules.penetration)],
+        ['Penetration mode',    PEN_MODE_NAMES[rules.penMode]],
+        ['Animation speed',     nameSpeed(speed)]
+    ];
+    const ROW_COUNT: number = rowsFor(currentRules, SPEED).length;
+
+    // The value column is cut for the widest option any row can hold, so the table keeps still
+    // as the player cycles through settings rather than breathing in and out a character at a time
+    const WIDEST_VALUE = PEN_MODE_NAMES.dealer;
+    const LABEL_WIDTH: number = Math.max(...rowsFor(currentRules, SPEED).map(([label]) => label.length));
+    const VALUE_WIDTH: number = WIDEST_VALUE.length;
+
+    // A single space of padding on either side of the text is the whole of each cell's margin
+    const LABEL_CELL: number = LABEL_WIDTH + 2;
+    const VALUE_CELL: number = VALUE_WIDTH + 2;
+
+    // The options a row cycles through will eventually be listed here, outside the right border
+    // and highlighted; rows are built one at a time so that third column can be hung off them
+    const CYCLE_GUTTER = ''.padEnd(4);
+
+    // Inverse video marks wherever the player is standing
+    const HIGHLIGHT = '\x1b[1;35m';
+    const PLAIN = '\x1b[0m';
+    const marked = (text: string, highlighted: boolean): string => highlighted ? `${HIGHLIGHT}${text}${PLAIN}` : text;
+
+    const rule = (left: string, join: string, right: string): string =>
+        `${left}${''.padEnd(LABEL_CELL, '─')}${join}${''.padEnd(VALUE_CELL, '─')}${right}`;
+    const row = (label: string, value: string, highlighted: boolean, cycled: string = ''): string =>
+        `│${marked(` ${label.padEnd(LABEL_WIDTH)} `, highlighted)}│ ${value.padEnd(VALUE_WIDTH)} │`
+        + (cycled == '' ? '' : CYCLE_GUTTER + cycled);
+
+    const centered = (text: string, width: number): string => {
+        const LEFT_PAD: number = Math.max(0, Math.floor((width - text.length) / 2));
+        return `${''.padEnd(LEFT_PAD)}${text}`.padEnd(Math.max(width, text.length));
+    };
+
+    // Where the player is standing: a rule row, or the footer, where left/right pick the button
+    const FOOTER_ROW: number = ROW_COUNT;
+    let selectedRow: number = 0;
+    let onCancel: boolean = false;
+
+    const menu = (): string => {
+        const BODY: string = rowsFor(draftRules, draftSpeed)
+            .map(([label, value], index) => row(label, value, index == selectedRow))
+            .join(`\n${rule('├', '┼', '┤')}\n`);
+
+        // Save and Cancel split the table evenly, the bar sitting under the column divider
+        const FOOTER = ` ${marked(centered('Save', LABEL_CELL), selectedRow == FOOTER_ROW && !onCancel)}`
+            + `|${marked(centered('Cancel [ESC]', VALUE_CELL), selectedRow == FOOTER_ROW && onCancel)} `;
+
+        return [rule('┌', '┬', '┐'), BODY, rule('└', '┴', '┘'), '', FOOTER].join('\n');
+    };
+
+    // Repaint in place -- home the cursor and wipe what was there rather than scrolling a new copy.
+    // Kept synchronous so a fast key repeat can never interleave two half-drawn screens
+    const draw = (): void => { output.write(`\x1b[H\x1b[0J${menu()}\n`) };
+
+    let onKeypress: ((str: string, key: linereader.Key) => void) | undefined;
+    try {
+        linereader.emitKeypressEvents(input);
+        input.setRawMode(true);
+
+        // The menu's prompt closed stdin's reader on the way in, and a closed reader leaves the
+        // stream explicitly paused -- a state that listening alone will not lift. Without this the
+        // keys never arrive and, with nothing left holding the loop open, the program simply ends
+        input.resume();
+        draw();
+
+        // Nothing loops here: awaiting parks settingsMenu and hands the event loop back to Node,
+        // which wakes the handler only when a key actually arrives. The promise is the menu --
+        // it stays unsettled while the player navigates, and resolving it is what closes the screen
+        const SAVED: RuleSet | undefined = await new Promise<RuleSet | undefined>((resolve) => {
+            onKeypress = (_str, key) => {
+                // Manual exit-hatch for raw mode
+                if (!key || (key.ctrl && key.name == 'c')) process.exit(130);
+
+                switch (key.name) {
+                    case 'escape': {
+                        resolve(undefined);
+                        return;
+                    }
+                    case 'return': {
+                        if (selectedRow == FOOTER_ROW) {
+                            resolve(onCancel ? undefined : draftRules);
+                            return;
+                        }
+                        break;
+                    }
+                    case 'up': {
+                        selectedRow = selectedRow == 0 ? FOOTER_ROW : selectedRow - 1;
+                        break;
+                    }
+                    case 'down': {
+                        selectedRow = selectedRow == FOOTER_ROW ? 0 : selectedRow + 1;
+                        break;
+                    }
+                    case 'left':
+                    case 'right': {
+                        // The footer's two buttons stand in for the cycling that the rule rows will do
+                        if (selectedRow == FOOTER_ROW) onCancel = key.name == 'right';
+                        break;
+                    }
+                }
+
+                // Every key that didn't end the menu leaves the screen showing the new state
+                draw();
+            };
+            input.on('keypress', onKeypress);
+        });
+
+        // Speed lives outside the rule set, so saving has to plant it by hand
+        if (SAVED) SPEED = draftSpeed;
+        return SAVED ?? currentRules;
+    }
+    finally {
+        if (onKeypress) input.off('keypress', onKeypress);
+        input.setRawMode(false);
+        input.pause();
     }
 }
 
