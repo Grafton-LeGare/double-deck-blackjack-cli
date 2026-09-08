@@ -66,9 +66,9 @@ async function main() {
     do {
         // Pre-game Menu
         printSpaced(`Your current bankroll is ${formatCurrency(gameState.bank)}`);
-        await sleep(1);
+        await sleep(1 * SPEED);
         printSpaced("Would you like to play a new hand? (P - Play | Q - Quit | D - Display shoe | R - Reshuffle | S - Settings)");
-        await sleep(0.5);
+        await sleep(0.5 * SPEED);
 
         userResponse = (await arrowedPrompt()).toLowerCase();
 
@@ -100,7 +100,7 @@ async function main() {
             finally {
                 output.write('\x1b[?1049l');
                 inAltScreen = false;
-                await sleep(0.5);
+                await sleep(SPEED < 1 ? 0.25 : 0.5);
             }    
             gameState = {...gameState, gamePhase: 'bet'};  
             
@@ -123,7 +123,7 @@ async function main() {
             // Display the shoe at current state
             const PER_ROW = 13;
             output.write(formatShoe(gameState.shoe, PER_ROW));
-            await sleep(1.25);
+            await sleep(1.25 * SPEED);
         }
 
         else if (userResponse == 'r' || userResponse == 'reshuffle') {
@@ -131,7 +131,7 @@ async function main() {
             output.write('\r');
             await displayAnimation(RESHUFFLE_ANIMATION);
             gameState = refreshShoe(gameState);
-            await sleep(0.5);
+            await sleep(0.5 * SPEED);
         }
 
         else if (userResponse == 's' || userResponse == 'settings') {
@@ -140,20 +140,21 @@ async function main() {
             inAltScreen = true;
             try {
                 gameRules = await settingsMenu(gameRules);
+                gameState = newGame(gameRules, gameState.bank);
             }
             finally {
                 output.write('\x1b[?1049l');
                 inAltScreen = false;
-                await sleep(0.5);
+                await sleep(SPEED < 1 ? 0.25 : 0.5);
             }
         }
 
         else {
             // Redirect for invalid input
             printSpaced("Invalid response");
-            await sleep(1);
+            await sleep(1 * SPEED);
             printSpaced("Please choose a selection from the menu (P, Q, D, R)");
-            await sleep(2);
+            await sleep(2 * SPEED);
         }
     } while (userResponse != 'q' && userResponse != 'quit');
 }
@@ -465,7 +466,7 @@ async function arrowedPrompt(): Promise<string> {
     finally {
         reader.close();
         output.write('\x1b[?25l');
-        await sleep(0.5);
+        await sleep(SPEED < 1 ? 0.25 : 0.5);
         output.write('\n');
     }
 }
@@ -477,7 +478,7 @@ async function paint(body: string, duration: number) {
     }
     output.write('\x1b[H\x1b[0J');
     output.write(`${body}\n`);
-    await sleep(duration);
+    await sleep(duration * SPEED);
 }
 
 // The frame an animation finishes on -- what's left on screen once it has played out
@@ -498,7 +499,7 @@ async function paintAnimation(animation: Animation, after: number = 0) {
         if (frame == undefined) throw new Error(`Animation frame ${i % FRAME_COUNT}/${FRAME_COUNT} is undefined.`);
         await paint(frame, TIME_PER_FRAME);
     }
-    if (after > 0) await sleep(after);
+    if (after > 0) await sleep(after * SPEED);
 }
 
 // A screen that asks a question: the body holds still with the arrow beneath it, and a
@@ -527,68 +528,138 @@ async function paintedPrompt(
 async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
     if (!input.isTTY) throw new Error("Error accessing settings menu: Input is not a TTY.");
 
-    // Every rule reads back as the option it is currently set to
+    // Every rule reads back as the option it is currently set to, and every option written
+    // in the table can be turned back into the value it stands for
     const yesNo = (flag: boolean): string => flag ? 'Yes' : 'No';
 
+    const PENETRATIONS = [[0.5, '1/2'], [2 / 3, '2/3'], [0.75, '3/4']] as const;
+    const PEN_MODES = [['notch', 'Notch'], ['cutcard', 'Cutcard'], ['dealer', 'Dealer choice']] as const;
+    const SPEEDS = [
+        [SPEED_OPTIONS.slow, 'Slow'], [SPEED_OPTIONS.normal, 'Normal'],
+        [SPEED_OPTIONS.fast, 'Fast'], [SPEED_OPTIONS.off, 'OFF']
+    ] as const;
+
+    // Paired the two together, so neither direction can name an option the other doesn't know
+    const labelFor = <T>(pairs: readonly (readonly [T, string])[], value: T): string => {
+        const PAIR = pairs.find(([option]) => option == value);
+        if (!PAIR) throw new Error(`Error reading settings: ${value} is not one of the offered options.`);
+        return PAIR[1];
+    };
+    const valueFor = <T>(pairs: readonly (readonly [T, string])[], label: string): T => {
+        const PAIR = pairs.find(([, name]) => name == label);
+        if (!PAIR) throw new Error(`Error writing settings: there is no option named ${label}.`);
+        return PAIR[0];
+    };
+
     // Penetration is carried as a fraction of the shoe, so the closest offered slice names it
-    const PENETRATIONS = [[0.75, '3/4'], [2 / 3, '2/3'], [0.5, '1/2']] as const;
     const namePenetration = (fraction: number): string => PENETRATIONS
         .reduce((closest, slice) => Math.abs(slice[0] - fraction) < Math.abs(closest[0] - fraction) ? slice : closest)[1];
 
-    const PEN_MODE_NAMES: Record<RuleSet['penMode'], string> = {
-        notch: 'Notch', cutcard: 'Cutcard', dealer: 'Dealer choice'
-    };
-
-    const nameSpeed = (speed: number): string =>
-          speed == SPEED_OPTIONS.slow ? 'Slow'
-        : speed == SPEED_OPTIONS.fast ? 'Fast'
-        : speed == SPEED_OPTIONS.off  ? 'OFF'
-        : 'Normal';
-
     // The table is rebuilt from the draft on every keypress, so a cancel can walk away from
-    // the edits and a save can hand them back whole
-    let draftRules: RuleSet = { ...currentRules };
-    let draftSpeed: number = SPEED;
+    // the edits and a save can hand them back whole. Speed rides along with the rules because
+    // it cycles like one, even though it lives outside the rule set
+    type Draft = { readonly rules: RuleSet; readonly speed: number };
+    let draft: Draft = { rules: { ...currentRules }, speed: SPEED };
+    const withRules = (from: Draft, changed: Partial<RuleSet>): Draft =>
+        ({ ...from, rules: { ...from.rules, ...changed } });
 
-    // One row per rule, in the order the player reads them, plus the animation speed
-    const rowsFor = (rules: RuleSet, speed: number): readonly (readonly [string, string])[] => [
-        ['Number of decks',     `[${rules.decks}]`],
-        ['Hit on soft 17',      yesNo(rules.h17)],
-        ['Re-split split aces', yesNo(rules.rsa)],
-        ['Double after split',  yesNo(rules.das)],
-        ['Max hands',           `[${rules.maxHands}]`],
-        ['Surrender allowed',   yesNo(rules.surrender)],
-        ['Blackjack payout',    rules.blackjackPays == 1.5 ? '3:2' : '6:5'],
-        ['Shoe penetration',    namePenetration(rules.penetration)],
-        ['Penetration mode',    PEN_MODE_NAMES[rules.penMode]],
-        ['Animation speed',     nameSpeed(speed)]
+    // One row per rule, in the order the player reads them, plus the animation speed. Each row
+    // owns its options and both halves of its binding -- read lifts the current option out of the
+    // draft, write puts a chosen one back -- so a row is added or moved in exactly one place
+    type Setting = {
+        readonly label: string;
+        readonly options: readonly string[];
+        readonly read: (from: Draft) => string;
+        readonly write: (from: Draft, option: string) => Draft;
+    };
+    const SETTINGS: readonly Setting[] = [
+        {
+            label: 'Number of decks',
+            options: ['1', '2', '4', '6', '8'],
+            read: (from) => `${from.rules.decks}`,
+            write: (from, option) => withRules(from, { decks: Number(option) })
+        },
+        {
+            label: 'Hit on soft 17',
+            options: ['Yes', 'No'],
+            read: (from) => yesNo(from.rules.h17),
+            write: (from, option) => withRules(from, { h17: option == 'Yes' })
+        },
+        {
+            label: 'Re-split split aces',
+            options: ['Yes', 'No'],
+            read: (from) => yesNo(from.rules.rsa),
+            write: (from, option) => withRules(from, { rsa: option == 'Yes' })
+        },
+        {
+            label: 'Double after split',
+            options: ['Yes', 'No'],
+            read: (from) => yesNo(from.rules.das),
+            write: (from, option) => withRules(from, { das: option == 'Yes' })
+        },
+        {
+            label: 'Max hands',
+            options: ['2', '3', '4', '6'],
+            read: (from) => `${from.rules.maxHands}`,
+            write: (from, option) => withRules(from, { maxHands: Number(option) })
+        },
+        {
+            label: 'Surrender allowed',
+            options: ['Yes', 'No'],
+            read: (from) => yesNo(from.rules.surrender),
+            write: (from, option) => withRules(from, { surrender: option == 'Yes' })
+        },
+        {
+            label: 'Blackjack payout',
+            options: ['3:2', '6:5'],
+            read: (from) => from.rules.blackjackPays == 1.5 ? '3:2' : '6:5',
+            write: (from, option) => withRules(from, { blackjackPays: option == '3:2' ? 1.5 : 1.2 })
+        },
+        {
+            label: 'Shoe penetration',
+            options: PENETRATIONS.map(([, name]) => name),
+            read: (from) => namePenetration(from.rules.penetration),
+            write: (from, option) => withRules(from, { penetration: valueFor(PENETRATIONS, option) })
+        },
+        {
+            label: 'Penetration mode',
+            options: PEN_MODES.map(([, name]) => name),
+            read: (from) => labelFor(PEN_MODES, from.rules.penMode),
+            write: (from, option) => withRules(from, { penMode: valueFor(PEN_MODES, option) })
+        },
+        {
+            label: 'Animation speed',
+            options: SPEEDS.map(([, name]) => name),
+            read: (from) => labelFor(SPEEDS, from.speed),
+            write: (from, option) => ({ ...from, speed: valueFor(SPEEDS, option) })
+        }
     ];
-    const ROW_COUNT: number = rowsFor(currentRules, SPEED).length;
+
+    // A number reads as a quantity rather than a choice, so it wears brackets in the table
+    const inCell = (option: string): string => Number.isNaN(Number(option)) ? option : `[${option}]`;
 
     // The value column is cut for the widest option any row can hold, so the table keeps still
     // as the player cycles through settings rather than breathing in and out a character at a time
-    const WIDEST_VALUE = PEN_MODE_NAMES.dealer;
-    const LABEL_WIDTH: number = Math.max(...rowsFor(currentRules, SPEED).map(([label]) => label.length));
-    const VALUE_WIDTH: number = WIDEST_VALUE.length;
+    const LABEL_WIDTH: number = Math.max(...SETTINGS.map((setting) => setting.label.length));
+    const VALUE_WIDTH: number = Math.max(...SETTINGS.flatMap((setting) => setting.options.map((option) => inCell(option).length)));
 
     // A single space of padding on either side of the text is the whole of each cell's margin
     const LABEL_CELL: number = LABEL_WIDTH + 2;
     const VALUE_CELL: number = VALUE_WIDTH + 2;
 
-    // The options a row cycles through will eventually be listed here, outside the right border
-    // and highlighted; rows are built one at a time so that third column can be hung off them
+    // The options a row cycles through are listed outside the right border, in a third column
     const CYCLE_GUTTER = ''.padEnd(4);
 
-    // Inverse video marks wherever the player is standing
+    // Colour marks wherever the player is standing
     const HIGHLIGHT = '\x1b[1;35m';
     const PLAIN = '\x1b[0m';
     const marked = (text: string, highlighted: boolean): string => highlighted ? `${HIGHLIGHT}${text}${PLAIN}` : text;
 
     const rule = (left: string, join: string, right: string): string =>
         `${left}${''.padEnd(LABEL_CELL, '─')}${join}${''.padEnd(VALUE_CELL, '─')}${right}`;
-    const row = (label: string, value: string, highlighted: boolean, cycled: string = ''): string =>
-        `│${marked(` ${label.padEnd(LABEL_WIDTH)} `, highlighted)}│ ${value.padEnd(VALUE_WIDTH)} │`
-        + (cycled == '' ? '' : CYCLE_GUTTER + cycled);
+    const row = (label: string, value: string, cycled: string = ''): string =>
+        `│ ${label.padEnd(LABEL_WIDTH)} │ ${value.padEnd(VALUE_WIDTH)} │`
+        + (cycled == '' ? '' : marked(CYCLE_GUTTER + cycled, true));
 
     const centered = (text: string, width: number): string => {
         const LEFT_PAD: number = Math.max(0, Math.floor((width - text.length) / 2));
@@ -596,13 +667,29 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
     };
 
     // Where the player is standing: a rule row, or the footer, where left/right pick the button
-    const FOOTER_ROW: number = ROW_COUNT;
+    const FOOTER_ROW: number = SETTINGS.length;
     let selectedRow: number = 0;
     let onCancel: boolean = false;
 
+    // The draft is the only record of what is selected -- the option showing in a row IS the row's
+    // value -- so cycling reads the draft for where it stands and writes back the neighbouring option
+    const cycle = (direction: number): void => {
+        const SETTING: Setting | undefined = SETTINGS[selectedRow];
+        if (!SETTING) throw new Error(`Error cycling the settings menu: row ${selectedRow} does not exist.`);
+
+        // A rule set carrying a value the menu doesn't offer starts the cycle from the first option
+        const CURRENT: number = Math.max(0, SETTING.options.indexOf(SETTING.read(draft)));
+        const NEXT: string | undefined = SETTING.options[(CURRENT + direction + SETTING.options.length) % SETTING.options.length];
+        if (NEXT == undefined) throw new Error(`Error cycling the settings menu: row ${selectedRow} offers no options.`);
+
+        draft = SETTING.write(draft, NEXT);
+    };
+
     const menu = (): string => {
-        const BODY: string = rowsFor(draftRules, draftSpeed)
-            .map(([label, value], index) => row(label, value, index == selectedRow))
+        const BODY: string = SETTINGS
+            .map((setting, index) => index == selectedRow
+                ? row(setting.label, inCell(setting.read(draft)), `← ${setting.read(draft)} →`)
+                : row(setting.label, inCell(setting.read(draft))))
             .join(`\n${rule('├', '┼', '┤')}\n`);
 
         // Save and Cancel split the table evenly, the bar sitting under the column divider
@@ -642,7 +729,7 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
                     }
                     case 'return': {
                         if (selectedRow == FOOTER_ROW) {
-                            resolve(onCancel ? undefined : draftRules);
+                            resolve(onCancel ? undefined : draft.rules);
                             return;
                         }
                         break;
@@ -655,10 +742,14 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
                         selectedRow = selectedRow == FOOTER_ROW ? 0 : selectedRow + 1;
                         break;
                     }
-                    case 'left':
+                    case 'left': {
+                        if (selectedRow == FOOTER_ROW) onCancel = !onCancel;
+                        else cycle(-1);
+                        break;
+                    }
                     case 'right': {
-                        // The footer's two buttons stand in for the cycling that the rule rows will do
-                        if (selectedRow == FOOTER_ROW) onCancel = key.name == 'right';
+                        if (selectedRow == FOOTER_ROW) onCancel = !onCancel;
+                        else cycle(1);
                         break;
                     }
                 }
@@ -670,7 +761,7 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
         });
 
         // Speed lives outside the rule set, so saving has to plant it by hand
-        if (SAVED) SPEED = draftSpeed;
+        if (SAVED) SPEED = draft.speed;
         return SAVED ?? currentRules;
     }
     finally {
@@ -683,7 +774,7 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
 // Re-prompts until the move is legal, wiping the rejected input and the warning in place
 async function actionPrompt(legalActions: readonly Action[]): Promise<Action> {
     const INVALID_MOVE_MESSAGE = "Invalid selection! Please select a legal move";
-    const INVALID_MOVE_DURATION = 2;
+    const INVALID_MOVE_DURATION = 2 * SPEED;
 
     while (true) {
         const reader: readline.Interface = readline.createInterface(input, output);
@@ -699,7 +790,7 @@ async function actionPrompt(legalActions: readonly Action[]): Promise<Action> {
 
         const playerAction: Action | undefined = parseAction(response);
         if (playerAction && legalActions.includes(playerAction)) {
-            await sleep(1/3);
+            await sleep(SPEED < 1 ? (1/6) : (1/3));
             output.write('\n');
             return playerAction;
         }
