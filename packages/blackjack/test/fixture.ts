@@ -1,6 +1,6 @@
-import type { Card, Rank, Suit, RuleSet, GameState } from '../src/blackjack-types.ts';
+import type { Card, Rank, Suit, RuleSet, GameState, Hand, DealerHand, PlayerAction, Step } from '../src/blackjack-types.ts';
 import { RANKS, SUITS } from '../src/blackjack-types.ts';
-import { getCutCardPosition } from '../src/engine.ts';
+import { getCutCardPosition, reduce } from '../src/engine.ts';
 
 // Filler for test shoes -- cycles ranks/suits
 export function shoeFiller(decks: number, testSize: number): Card[] {
@@ -33,6 +33,7 @@ export function parseCards(shorthand: string[]): Card[] {
     });
 }
 
+// DO NOT CHANGE THIS - many tests would have to be adjusted
 export const DEFAULT_TEST_RULES: RuleSet = {
     decks: 2,
     h17: true,
@@ -42,7 +43,7 @@ export const DEFAULT_TEST_RULES: RuleSet = {
     surrender: true,
     blackjackPays: 1.5,
     penetration: 0.75,
-    penMode: 'notch'    // DO NOT change if testing penetration
+    penMode: 'notch'
 };
 
 // Builds a testable state with testCards as the first cards from the shoe
@@ -68,3 +69,84 @@ export function testState(testCards: string[], testRules?: Partial<RuleSet>): Ga
         bank: 999999
     }
 };
+
+// Builds a player hand from card shorthand -- overrides only the fields it names
+export function testHand(cards: string[], overrides?: Partial<Hand>): Hand {
+    return { cards: parseCards(cards), bet: 10, fromSplit: false, result: 'pending', ...overrides };
+}
+
+// Builds a dealer hand from card shorthand -- upcard, then hole, then any drawn cards
+export function testDealerHand(cards: string[], overrides?: Partial<DealerHand>): DealerHand {
+    const [upcard, hole, ...drawn] = parseCards(cards);
+
+    return { upcard, hole, drawn, holeRevealed: false, playedOut: false, ...overrides };
+}
+
+const SIMPLE_ACTIONS = ['hit', 'stand', 'double', 'split', 'surrender', 'evenMoney'] as const;
+const AMOUNT_ACTIONS = ['bet', 'insurance'] as const;
+
+type SimpleAction = typeof SIMPLE_ACTIONS[number];
+type AmountAction = typeof AMOUNT_ACTIONS[number];
+
+// Parses action shorthand -- 'hit', 'bet 10', 'split x3' -- and throws on anything else
+function parseAction(shorthand: string, i: number): { action: PlayerAction; repeat: number } {
+    const parts = shorthand.trim().split(/\s+/);
+    let repeat = 1;
+
+    const last = parts.at(-1) ?? '';
+    if (parts.length > 1 && /^x\d+$/.test(last)) {
+        repeat = Number(last.slice(1));
+        parts.pop();
+    }
+
+    const word = parts.at(0) as SimpleAction & AmountAction;
+    const arg = parts.at(1);
+    const isSimple = SIMPLE_ACTIONS.includes(word);
+    const isAmount = AMOUNT_ACTIONS.includes(word);
+
+    const bad =
+        parts.length > 2 ||
+        repeat < 1 ||
+        (!isSimple && !isAmount) ||
+        (isSimple && arg !== undefined) ||
+        (isAmount && !Number.isFinite(Number(arg)));
+
+    if (bad) {
+        throw new Error(
+            `play: bad action ${JSON.stringify(shorthand)} at index ${i} ` +
+            `(expected ${SIMPLE_ACTIONS.join('/')}, or ${AMOUNT_ACTIONS.join('/')} with an amount, ` +
+            `each optionally followed by a repeat count like "x3")`
+        );
+    }
+
+    const action: PlayerAction = isAmount
+        ? { type: word as AmountAction, amount: Number(arg) }
+        : { type: word as SimpleAction };
+
+    return { action, repeat };
+}
+
+// Folds a sequence of actions over reduce, returning every Step it produced
+export function playSteps(state: GameState, ...actions: (string | PlayerAction)[]): Step[] {
+    const steps: Step[] = [];
+    let current = state;
+
+    actions.forEach((entry, i) => {
+        const { action, repeat } = typeof entry === 'string'
+            ? parseAction(entry, i)
+            : { action: entry, repeat: 1 };
+
+        for (let n = 0; n < repeat; n++) {
+            const step = reduce(current, action);
+            steps.push(step);
+            current = step.after;
+        }
+    });
+
+    return steps;
+}
+
+// Folds a sequence of actions over reduce, returning only the final state
+export function play(state: GameState, ...actions: (string | PlayerAction)[]): GameState {
+    return playSteps(state, ...actions).at(-1)?.after ?? state;
+}
