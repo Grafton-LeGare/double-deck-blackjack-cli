@@ -1,27 +1,19 @@
-# DoubleDeck Blackjack Trainer
+# DoubleDeck: Animated CLI Blackjack Game
 
-A counting and strategy training game for double deck Blackjack.
+An animated CLI blackjack game built in TypeScript: play for fun or polish your skills against a ruleset of your choosing.
 
-## [Project Status](https://github.com/Grafton-LeGare/double-deck-trainer/milestones)
+## Project Status
 
 - [x] **M0 — Scaffold**
 
-- [ ] **M1 — Engine core**
+- [x] **M1 — Engine core**
       
-- [ ] **M2 — Strategy data + oracle**
+- [x] **M2 — Rendering and Animations**
       
-- [ ] **M3 — CLI play harness**
-      
-- [ ] **M4 — Sim harness**
-      
-- [ ] **M5 — Persistence**
-      
-- [ ] **M6 — Analytics, scoring and regrade**
-      
-- [ ] **M7 — Minimal React**
+- [x] **M3 — Engine Test Suite**
 
-- [ ] **M8 — Parity port**
+#### Project is now complete!
 
 <br>
 
-_Copyright © 2026. All rights reserved. Not licensed for redistribution._
+_Released under the [MIT License](LICENSE)._

@@ -1,14 +1,19 @@
 {
-  "name": "DoubleDeck",
+  "name": "doubledeck",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "An animated CLI blackjack game built in TypeScript.",
   "scripts": {
-    "test": "vitest"
+    "test": "vitest run"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "blackjack",
+    "cli",
+    "game",
+    "typescript"
+  ],
+  "author": "Grafton LeGare",
+  "license": "MIT",
+  "private": true,
   "devEngines": {
     "packageManager": {
       "name": "pnpm",

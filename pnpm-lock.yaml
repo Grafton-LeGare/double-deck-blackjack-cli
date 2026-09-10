@@ -217,13 +217,21 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0))
 
+  apps/cli:
+    dependencies:
+      '@doubledeck/blackjack':
+        specifier: workspace:*
+        version: link:../../packages/blackjack
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+
   packages/blackjack:
     devDependencies:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0))
-
-  packages/data: {}
 
 packages:
 
