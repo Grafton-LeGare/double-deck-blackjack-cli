@@ -41,7 +41,6 @@ export const PLAYING_CARDS: readonly Card[] = [
 
 // Dealer
 export type Shoe = {
-    readonly decks: number;
     readonly cutCardPosition: number;
     readonly cardsDealt: number;
     readonly cardsRemaining: readonly Card[]
@@ -63,7 +62,6 @@ export type DealerHand = {
     readonly upcard?: Card;
     readonly hole?: Card;
     readonly drawn: readonly Card[];
-    readonly holeRevealed: boolean;
     readonly playedOut: boolean
 };
 

@@ -153,7 +153,7 @@ async function main() {
             // Redirect for invalid input
             printSpaced("Invalid response");
             await sleep(1 * SPEED);
-            printSpaced("Please choose a selection from the menu (P, Q, D, R)");
+            printSpaced("Please choose a selection from the menu (P, Q, D, R, S)");
             await sleep(2 * SPEED);
         }
     } while (userResponse != 'q' && userResponse != 'quit');
@@ -405,7 +405,6 @@ function newGame(rules: RuleSet, bankroll: number): GameState {
     const shuffledDeck: Card[] = shuffleDecks(combinedDeck);
 
     const shoe: Shoe = {
-        decks: rules.decks,
         cutCardPosition: getCutCardPosition(rules),
         cardsDealt: 0,
         cardsRemaining: shuffledDeck
@@ -415,7 +414,7 @@ function newGame(rules: RuleSet, bankroll: number): GameState {
         rules: rules,
         shoe: shoe,
         hands: [],
-        dealerHand: { drawn: [], holeRevealed: false, playedOut: false },
+        dealerHand: { drawn: [], playedOut: false },
         activeHand: 0,
         insurance: 0,
         gamePhase: 'bet',

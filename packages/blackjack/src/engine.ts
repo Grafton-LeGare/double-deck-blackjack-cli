@@ -24,7 +24,6 @@ export function reduce(state: GameState, action: PlayerAction): Step {
                 }],
                 dealerHand: {
                     drawn: [],
-                    holeRevealed: false,
                     playedOut: false
                 },
                 activeHand: 0,
@@ -259,8 +258,8 @@ function activateNextHand(state: GameState, log: GameEvent[]): GameState {
 }
 
 function settleHands(state: GameState, log: GameEvent[]): GameState {
-    // Transition to settle and reveal the dealer's hole 
-    state = {...state, dealerHand: {...state.dealerHand, holeRevealed: true}, gamePhase: 'settle'};
+    // Transition to settle -- the CLI reveals the hole off playedOut and gamePhase
+    state = {...state, gamePhase: 'settle'};
 
     // Dealer play - yep this is it
     // Don't play if player fully busted or has natural blackjack
@@ -339,7 +338,6 @@ function settleSurrender(state: GameState, log: GameEvent[]): GameState {
                 bet: currentHand.bet,
                 result: 'surrender'
             }],
-            dealerHand: { ...state.dealerHand, holeRevealed: true},
             gamePhase: 'settle', 
             bank: state.bank + bet / 2
         };
@@ -369,14 +367,15 @@ export function shuffleDecks(deck: readonly Card[]): Card[] {
 
 export function getCutCardPosition(rules: RuleSet): number {
     const defaultPen = rules.penetration;
-    const jitter = jitterFromPenMode(rules.penMode);
     let adjustedPen: number;
     if (rules.penMode == 'notch') {
+        // A notch sits at a fixed depth -- no dealer-to-dealer variance to apply
         adjustedPen = defaultPen;
     }
     else {
         // Minimum 0.4, maximum 0.88, variance -jitter : +jitter
-        adjustedPen = Math.max(0.40, Math.min(0.88, defaultPen + (Math.random() * 2 - 1) * jitter));      
+        const jitter = jitterFromPenMode(rules.penMode);
+        adjustedPen = Math.max(0.40, Math.min(0.88, defaultPen + (Math.random() * 2 - 1) * jitter));
     }
     return Math.floor(adjustedPen * (rules.decks * 52 - 1)); 
 }
@@ -398,7 +397,6 @@ export function refreshShoe(state: GameState, inPlay: readonly Card[] = []): Gam
 
     const shuffledDeck: Card[] = shuffleDecks(undealt);
     const freshShoe: Shoe = {
-        decks: state.rules.decks,
         cutCardPosition: getCutCardPosition(state.rules),
         // Held cards count as dealt -- keeps shoeSize - cardsDealt equal to what's left to draw
         cardsDealt: inPlay.length,
@@ -407,8 +405,8 @@ export function refreshShoe(state: GameState, inPlay: readonly Card[] = []): Gam
     return {...state, shoe: freshShoe};
 }
 
-function jitterFromPenMode(mode: string): number {
-    return mode === 'notch' ? 0 : mode === 'cutcard' ? 0.025 : 0.075;
+function jitterFromPenMode(mode: Exclude<RuleSet['penMode'], 'notch'>): number {
+    return mode === 'cutcard' ? 0.025 : 0.075;
 }
 // #endregion
 

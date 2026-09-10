@@ -56,13 +56,12 @@ export function testState(testCards: string[], testRules?: Partial<RuleSet>): Ga
     return {
         rules,
         shoe: {
-            decks: rules.decks,
             cutCardPosition: getCutCardPosition(rules),
             cardsDealt: 0,
             cardsRemaining: [...parsedCards, ...shoeFiller(rules.decks, parsedCards.length)]
         },
         hands: [],
-        dealerHand: { drawn: [], holeRevealed: false, playedOut: false },
+        dealerHand: { drawn: [], playedOut: false },
         activeHand: 0,
         insurance: 0,
         gamePhase: 'bet',
@@ -79,7 +78,7 @@ export function testHand(cards: string[], overrides?: Partial<Hand>): Hand {
 export function testDealerHand(cards: string[], overrides?: Partial<DealerHand>): DealerHand {
     const [upcard, hole, ...drawn] = parseCards(cards);
 
-    return { upcard, hole, drawn, holeRevealed: false, playedOut: false, ...overrides };
+    return { upcard, hole, drawn, playedOut: false, ...overrides };
 }
 
 const SIMPLE_ACTIONS = ['hit', 'stand', 'double', 'split', 'surrender', 'evenMoney'] as const;

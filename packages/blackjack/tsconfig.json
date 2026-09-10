@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "types": [],
-    "rewriteRelativeImportExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src/**/*", "test/**/*"]
 }
