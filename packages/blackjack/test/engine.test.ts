@@ -1,5 +1,5 @@
-import { expect, test, describe, it, assert } from 'vitest';
-import type { Card, Rank, Suit, Shoe, Hand, DealerHand, Action, RuleSet, GameState, Step } from '../src/blackjack-types.ts';
+import { expect, describe, it, assert } from 'vitest';
+import type { Card, Hand, DealerHand, RuleSet, GameState, Step } from '../src/blackjack-types.ts';
 import {
     reduce,
     combineDecks,
@@ -186,6 +186,79 @@ describe('reduce: settle', () => {
         assert(end.gamePhase === 'settle');
         expect(end.shoe.cardsDealt).toBe(0);
         expect(end.shoe.cardsRemaining.length).toBe(104);
+    });
+});
+
+describe('reduce: dealer play', () => {
+    it('stands on a hard 17', () => {
+        const start: GameState = testState(['9H', 'TD', '8D', '7S']);
+        const end = play(start, 'bet 10', 'stand');
+
+        assert(end.gamePhase === 'settle');
+        expect(end.dealerHand.playedOut).toBe(true);
+        expect(end.dealerHand.drawn.length).toBe(0);
+        expect(handTotal(end.dealerHand)).toBe(17);
+    });
+
+    it('hits a soft 17 with H17', () => {
+        const start: GameState = testState(['9H', '6S', '8D', 'AD', '4H']);
+        const end = play(start, 'bet 10', 'stand');
+
+        assert(end.gamePhase === 'settle');
+        expect(end.dealerHand.drawn).toEqual(parseCards(['4H']));
+        expect(handTotal(end.dealerHand)).toBe(21);
+    });
+
+    it('stands on the same soft 17 with S17', () => {
+        const start: GameState = testState(['9H', '6S', '8D', 'AD', '4H'], { h17: false });
+        const end = play(start, 'bet 10', 'stand');
+
+        assert(end.gamePhase === 'settle');
+        expect(end.dealerHand.playedOut).toBe(true);
+        expect(end.dealerHand.drawn.length).toBe(0);
+        expect(handTotal(end.dealerHand)).toBe(17);
+    });
+
+    it('keeps hitting when a soft 17 hit lands back under 17', () => {
+        // A6 hits to a hard 16, which has to be hit again
+        const start: GameState = testState(['9H', '6S', '8D', 'AD', '9C', '5H']);
+        const end = play(start, 'bet 10', 'stand');
+
+        assert(end.gamePhase === 'settle');
+        expect(end.dealerHand.drawn).toEqual(parseCards(['9C', '5H']));
+        expect(handTotal(end.dealerHand)).toBe(21);
+    });
+
+    it('does not play out against a busted player', () => {
+        const start: GameState = testState(['9H', 'TD', '8D', '6S', 'TS']);
+        const end = play(start, 'bet 10', 'hit');
+
+        assert(end.gamePhase === 'settle');
+        assert(handTotal(end.hands[0]!) > 21);
+        expect(end.dealerHand.playedOut).toBe(false);
+        expect(end.dealerHand.drawn.length).toBe(0);
+        expect(handTotal(end.dealerHand)).toBe(16);
+    });
+
+    it('does not play out against a player blackjack', () => {
+        const start: GameState = testState(['AH', 'TD', 'JH', '6S']);
+        const end = play(start, 'bet 10');
+
+        assert(end.gamePhase === 'settle');
+        assert(isBlackjack(end.hands[0]!));
+        expect(end.dealerHand.playedOut).toBe(false);
+        expect(end.dealerHand.drawn.length).toBe(0);
+        expect(handTotal(end.dealerHand)).toBe(16);
+    });
+
+    it('does not play out against a surrender', () => {
+        const start: GameState = testState(['2H', 'TD', '3H', '6S']);
+        const end = play(start, 'bet 10', 'surrender');
+
+        assert(end.gamePhase === 'settle');
+        expect(end.dealerHand.playedOut).toBe(false);
+        expect(end.dealerHand.drawn.length).toBe(0);
+        expect(handTotal(end.dealerHand)).toBe(16);
     });
 });
 
