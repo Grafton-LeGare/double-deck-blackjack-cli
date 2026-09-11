@@ -157,6 +157,9 @@ async function main() {
             await sleep(2 * SPEED);
         }
     } while (userResponse != 'q' && userResponse != 'quit');
+
+    await sleep(0.5);
+    await exitConfirmation();
 }
 
 // This application can PERMANENTLY hide the cursor - this makes sure you always get it back.
@@ -466,6 +469,32 @@ async function arrowedPrompt(): Promise<string> {
         reader.close();
         output.write('\x1b[?25l');
         await sleep(SPEED < 1 ? 0.25 : 0.5);
+        output.write('\n');
+    }
+}
+
+// Holds the finished screen in place so a double-clicked launcher can't close the window on the
+// last message. Skipped unless both ends are a terminal: piped input has nobody to press the key,
+// and would either fall straight through on EOF or sit there waiting on input that never comes
+async function exitConfirmation(): Promise<void> {
+    if (!input.isTTY || !output.isTTY) return;
+
+    // The cursor stays hidden here: nothing is being typed, so there's no caret to place
+    const reader: readline.Interface = readline.createInterface(input, output);
+    try {
+        output.write("Press Enter to exit");
+
+        // Ctrl-C and Ctrl-D both close the reader without ever handing over a line, so the close
+        // event has to end the wait too -- otherwise the promise never settles and the last thing
+        // this program does is hang on the one prompt the player can't get out of
+        await new Promise<void>((resolve) => {
+            reader.once('line', () => resolve());
+            reader.once('close', () => resolve());
+        });
+    }
+    finally {
+        // Closing releases stdin: left open, the reader holds the event loop and the process with it
+        reader.close();
         output.write('\n');
     }
 }
