@@ -1,3 +1,11 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+allowBuilds:
+  # Deliberately false. esbuild's postinstall replaces bin/esbuild (a Node shim)
+  # with the raw native binary, but pnpm has already generated node_modules/.bin/esbuild
+  # as `exec node .../esbuild/bin/esbuild` — which then tries to parse Mach-O as JS and
+  # dies with "Invalid or unexpected token". The native binary arrives via the
+  # @esbuild/<platform> optionalDependency regardless, so skipping the build costs us
+  # only ~30ms of Node startup per invocation.
+  esbuild: false

@@ -1,0 +1,49 @@
+name: release
+on:
+    push:
+        tags: ['v*']
+
+jobs:
+    build:
+        strategy:
+            matrix:
+                include:
+                    - os: windows-latest
+                      config: apps/cli/sea-config.win.json
+                      built: apps/cli/dist/cli-blackjack.exe
+                      asset: cli-blackjack-windows-x64.exe
+                    - os: macos-latest
+                      config: apps/cli/sea-config.json
+                      built: apps/cli/dist/cli-blackjack
+                      asset: cli-blackjack-macos-arm64
+                    - os: ubuntu-latest
+                      config: apps/cli/sea-config.json
+                      built: apps/cli/dist/cli-blackjack
+                      asset: cli-blackjack-linux-x64
+        runs-on: ${{ matrix.os }}
+        steps: 
+            - uses: actions/checkout@v5
+            - uses: pnpm/action-setup@v6
+            - uses: actions/setup-node@v6
+              with: { node-version: 26, cache: pnpm }
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm --filter cli build
+            - run: node --build-sea ${{ matrix.config }}
+            - if: runner.os == 'macOS'
+              run: codesign --sign - ${{ matrix.built }}
+            - shell: bash
+              run: mv ${{ matrix.built }} ${{ matrix.asset }}
+            - uses: actions/upload-artifact@v4
+              with:
+                name: ${{ matrix.asset }}
+                path: ${{ matrix.asset }}
+    
+    release: 
+        needs: build
+        runs-on: ubuntu-latest
+        permissions: { contents: write }
+        steps:
+            - uses: actions/download-artifact@v4
+              with: { path: out, merge-multiple: true }
+            - run: gh release create "$GITHUB_REF_NAME" out/* --generate-notes
+              env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }

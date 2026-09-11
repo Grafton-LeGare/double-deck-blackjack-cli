@@ -1,0 +1,6 @@
+{
+    "main": "dist/cli-blackjack.js",
+    "mainFormat": "module",
+    "output": "dist/cli-blackjack",
+    "disableExperimentalSEAWarning": true
+}

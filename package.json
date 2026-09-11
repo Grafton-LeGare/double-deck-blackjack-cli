@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "An animated CLI blackjack game built in TypeScript.",
   "scripts": {
+    "start": "pnpm --filter @doubledeck/cli dev",
     "test": "vitest run"
   },
   "keywords": [
@@ -24,6 +25,7 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }
