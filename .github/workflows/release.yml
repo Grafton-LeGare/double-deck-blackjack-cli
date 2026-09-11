@@ -8,16 +8,19 @@ jobs:
         strategy:
             matrix:
                 include:
+                    # `config` is relative to apps/cli: SEA resolves the paths inside
+                    # sea-config.json against the CWD, so that step runs there.
+                    # `built`/`asset` are relative to the repo root.
                     - os: windows-latest
-                      config: apps/cli/sea-config.win.json
+                      config: sea-config.win.json
                       built: apps/cli/dist/cli-blackjack.exe
                       asset: cli-blackjack-windows-x64.exe
                     - os: macos-latest
-                      config: apps/cli/sea-config.json
+                      config: sea-config.json
                       built: apps/cli/dist/cli-blackjack
                       asset: cli-blackjack-macos-arm64
                     - os: ubuntu-latest
-                      config: apps/cli/sea-config.json
+                      config: sea-config.json
                       built: apps/cli/dist/cli-blackjack
                       asset: cli-blackjack-linux-x64
         runs-on: ${{ matrix.os }}
@@ -29,6 +32,7 @@ jobs:
             - run: pnpm install --frozen-lockfile
             - run: pnpm --filter cli build
             - run: node --build-sea ${{ matrix.config }}
+              working-directory: apps/cli
             - if: runner.os == 'macOS'
               run: codesign --sign - ${{ matrix.built }}
             - shell: bash
@@ -46,4 +50,7 @@ jobs:
             - uses: actions/download-artifact@v4
               with: { path: out, merge-multiple: true }
             - run: gh release create "$GITHUB_REF_NAME" out/* --generate-notes
-              env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+              # GH_REPO because this job has no checkout, so gh has no git repo to infer from.
+              env:
+                GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+                GH_REPO: "${{ github.repository }}"

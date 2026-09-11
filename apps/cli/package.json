@@ -5,6 +5,7 @@
     "private": true,
     "scripts": {
         "dev": "node src/blackjack.ts",
+        "build": "esbuild src/blackjack.ts --bundle --platform=node --target=node26 --format=esm --outfile=dist/cli-blackjack.js",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
