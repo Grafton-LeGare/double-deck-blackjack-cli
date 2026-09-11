@@ -15,10 +15,16 @@ jobs:
                       config: sea-config.win.json
                       built: apps/cli/dist/cli-blackjack.exe
                       asset: cli-blackjack-windows-x64.exe
+                    # macOS ships a tarball, not a raw binary: release assets are plain
+                    # HTTP downloads with no permission metadata, so the +x bit only
+                    # survives inside an archive.
+                    # This does NOT clear Gatekeeper — quarantine propagates through tar
+                    # extraction, so an ad-hoc-signed binary is still blocked. Users must
+                    # run `xattr -d com.apple.quarantine` until this is notarized.
                     - os: macos-latest
                       config: sea-config.json
                       built: apps/cli/dist/cli-blackjack
-                      asset: cli-blackjack-macos-arm64
+                      asset: cli-blackjack-macos-arm64.tar.gz
                     - os: ubuntu-latest
                       config: sea-config.json
                       built: apps/cli/dist/cli-blackjack
@@ -35,9 +41,18 @@ jobs:
               working-directory: apps/cli
             - if: runner.os == 'macOS'
               run: codesign --sign - ${{ matrix.built }}
-            - shell: bash
+            # chmod before tar: upload-artifact normalizes files to 644, so the bit has
+            # to already be recorded inside the archive to survive the round trip.
+            - if: runner.os == 'macOS'
+              shell: bash
+              run: |
+                chmod +x ${{ matrix.built }}
+                tar czf ${{ matrix.asset }} -C apps/cli/dist cli-blackjack
+            # Windows runs .exe by extension; Linux users chmod +x after download.
+            - if: runner.os != 'macOS'
+              shell: bash
               run: mv ${{ matrix.built }} ${{ matrix.asset }}
-            - uses: actions/upload-artifact@v4
+            - uses: actions/upload-artifact@v7
               with:
                 name: ${{ matrix.asset }}
                 path: ${{ matrix.asset }}
@@ -47,7 +62,7 @@ jobs:
         runs-on: ubuntu-latest
         permissions: { contents: write }
         steps:
-            - uses: actions/download-artifact@v4
+            - uses: actions/download-artifact@v8
               with: { path: out, merge-multiple: true }
             - run: gh release create "$GITHUB_REF_NAME" out/* --generate-notes
               # GH_REPO because this job has no checkout, so gh has no git repo to infer from.
