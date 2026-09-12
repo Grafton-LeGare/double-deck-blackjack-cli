@@ -794,7 +794,6 @@ async function settingsMenu(currentRules: RuleSet): Promise<RuleSet> {
     }
     finally {
         if (onKeypress) input.off('keypress', onKeypress);
-        input.setRawMode(false);
         input.pause();
     }
 }
