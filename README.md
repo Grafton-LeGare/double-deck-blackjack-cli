@@ -18,23 +18,30 @@ Because this is an unsigned app with no public key/certificate, your operating s
 
 ## Features
 
-**From scratch game engine built with pure TypeScript —** features a pure TypeScript game-state reducer with a custom-built rendering & animation library. The engine models a real shoe game — insurance and even money, splits and re-splits, doubling after a split, surrender, cut-card penetration with dealer-to-dealer variance — and comes with a 66-case test suite. 
+#### From-scratch game engine built with pure TypeScript
+Features a pure TypeScript game-state reducer with a custom-built rendering & animation library. The engine models a real shoe game — insurance and even money, splits and re-splits, doubling after a split, surrender, cut-card penetration with dealer-to-dealer variance — and comes with a 66-case test suite. 
 
 Uses the Fisher-Yates shuffle algorithm: the sole non-deterministic input to the engine.
 
-**Interactive game-board UI and custom animations —** get dealt-in in real time, watch your hand separate in two on a split, and wait in suspense as the dealer takes their turn on-screen. Play a few games and see if you can get the special blackjack animation!
+<img width="800" height="450" alt="DoubleDeckShuffleDemo" src="https://github.com/user-attachments/assets/99cf9f9c-347c-469c-a8d4-a69aa9391b3c" />
 
-```
-CLI Casino • H17 • DAS • RSA Allowed • BJ Pays 3:2
-Playing hand 1/1
+#### Interactive game-board UI and custom animations
+Get dealt-in in real time, watch your hand separate in two on a split, and wait in suspense as the dealer takes their turn on-screen. Play a few games and see if you can get the special blackjack animation!
 
-Dealer   [K♠] [??]      showing 10
-You      [8♥] [7♦]      15             bet $25
+<br>
 
-  [H]it  [S]tand  [D]ouble
-```
+<img width="800" height="450" alt="DoubleDeckDealDemo" src="https://github.com/user-attachments/assets/85d4d972-d868-4962-b8c9-c27d0598cf30" />
 
-**Adjustable settings with a keyboard-driven menu —**  choose from a full list of blackjack rule settings, mirroring what you would find in real casinos. Animation speed can also be adjusted/toggled. Interaction uses stdin raw mode and color-highlighting for selections.
+<br> <br>
+
+<img width="800" height="450" alt="DoubleDeckSplitDemo" src="https://github.com/user-attachments/assets/abacff57-fd2b-4a11-9d65-99c842dd7e56" />
+
+<br>
+
+#### Adjustable settings with a keyboard-driven menu
+Choose from a full list of blackjack rule settings, mirroring what you would find in real casinos. Animation speed can also be adjusted/toggled. Interaction uses stdin raw mode and color-highlighting for selections.
+
+<img width="800" height="450" alt="DoubleDeckSettingsDemo" src="https://github.com/user-attachments/assets/e25affd2-3b7d-4547-9fdf-3dda9808d41e" />
 
 ## Running Locally
 
